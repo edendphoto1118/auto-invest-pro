@@ -2,33 +2,22 @@
 
 export async function fetchStockData(ticker: string) {
   try {
-    // 透過 Yahoo Finance 公開 API 抓取過去一年的日 K 線資料
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker.toUpperCase()}?interval=1d&range=1y`;
     const res = await fetch(url, { cache: 'no-store' });
-
     if (!res.ok) throw new Error('Failed to fetch data');
-
     const data = await res.json();
-    
-    if (!data.chart.result || data.chart.result.length === 0) {
-      throw new Error('No data found');
-    }
+    if (!data.chart.result || data.chart.result.length === 0) throw new Error('No data found');
 
     const result = data.chart.result[0];
     const timestamps = result.timestamp;
     const quotes = result.indicators.quote[0];
-
     const chartData = [];
 
-    // 將 Yahoo 的原始數據清洗並轉換為 lightweight-charts 要求的嚴格格式
     for (let i = 0; i < timestamps.length; i++) {
-      // 過濾掉可能因休市造成的 null 壞資料
       if (quotes.close[i] !== null && quotes.open[i] !== null) {
         const date = new Date(timestamps[i] * 1000);
-        const timeString = date.toISOString().split('T')[0]; // 轉換為 YYYY-MM-DD
-
         chartData.push({
-          time: timeString,
+          time: date.toISOString().split('T')[0],
           open: Number(quotes.open[i].toFixed(2)),
           high: Number(quotes.high[i].toFixed(2)),
           low: Number(quotes.low[i].toFixed(2)),
@@ -36,13 +25,58 @@ export async function fetchStockData(ticker: string) {
         });
       }
     }
-
     return { success: true, data: chartData };
   } catch (error) {
-    console.error("Fetch error:", error);
-    return { 
-      success: false, 
-      error: "無法取得資料，請確認代碼是否正確 (台股請加 .TW，例如: 2330.TW)" 
-    };
+    return { success: false, error: "無法取得資料，請確認代碼是否正確" };
+  }
+}
+
+// ==========================================
+// 注入 AI 分析大腦 (Gemini API Native Fetch)
+// ==========================================
+export async function generateAIReport(ticker: string, technicalData: any) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return { success: false, error: "系統未設定 API Key" };
+  }
+
+  const prompt = `
+你是一位頂級量化交易員。用戶的目標是「3年內資產翻倍」，這意味著你必須排除庸俗的建議，只給出高勝率、重風險控管的具體操作。
+目前標的：${ticker}
+最新技術面數據：
+- 最新收盤價：${technicalData.lastClose}
+- 20日均線(SMA)：${technicalData.sma}
+- 布林通道上軌：${technicalData.upper}
+- 布林通道下軌：${technicalData.lower}
+
+請根據布林通道與均線的相對位置，給出極度簡潔的判斷。
+強制以 JSON 格式輸出，絕對不要包含 Markdown 語法或任何其他文字，格式如下：
+{
+  "diagnosis": "用一句話精準點出目前的技術面位階（例如：價格跌破下軌，超賣訊號浮現 / 價格緊貼上軌，追高動能耗竭）。",
+  "action": "針對『3年翻倍』目標，給出具體資金配置建議（例如：切勿追高，等待回測 20ma 再佈局 20% 資金 / 左側建倉時機，可投入 10% 試單）。"
+}
+`;
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.2 }
+      })
+    });
+
+    const result = await response.json();
+    const aiText = result.candidates[0].content.parts[0].text;
+    
+    const cleanJsonString = aiText.replace(/```json\n?|\n?```/g, '').trim();
+    const parsedData = JSON.parse(cleanJsonString);
+
+    return { success: true, data: parsedData };
+  } catch (error) {
+    console.error("AI Error:", error);
+    return { success: false, error: "AI 運算超載，請稍後再試。" };
   }
 }
