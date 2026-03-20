@@ -1,12 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createChart, CrosshairMode, ColorType } from "lightweight-charts";
+import { createChart, CrosshairMode, ColorType, Time } from "lightweight-charts";
+
+interface CandleData {
+  time: Time;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
 
 // ==========================================
 // 1. 核心演算法：自動計算布林通道 (Bollinger Bands)
 // ==========================================
-function calculateBollingerBands(data: any[], period = 20, multiplier = 2) {
+function calculateBollingerBands(data: CandleData[], period = 20, multiplier = 2) {
   const upperBand = [];
   const lowerBand = [];
   const movingAverage = [];
@@ -32,17 +40,17 @@ function calculateBollingerBands(data: any[], period = 20, multiplier = 2) {
 // ==========================================
 // 2. 模擬數據生成
 // ==========================================
-function generateMockData() {
+function generateMockData(): CandleData[] {
   let initialDate = new Date(2023, 0, 1).getTime();
   let basePrice = 150;
-  const data = [];
+  const data: CandleData[] = [];
   for (let i = 0; i < 200; i++) {
-    const time = (initialDate + i * 24 * 60 * 60 * 1000) / 1000;
+    const timeValue = Math.floor((initialDate + i * 24 * 60 * 60 * 1000) / 1000) as Time;
     const open = basePrice + (Math.random() - 0.5) * 5;
     const close = open + (Math.random() - 0.5) * 5;
     const high = Math.max(open, close) + Math.random() * 2;
     const low = Math.min(open, close) - Math.random() * 2;
-    data.push({ time: time as any, open, high, low, close });
+    data.push({ time: timeValue, open, high, low, close });
     basePrice = close;
   }
   return data;
@@ -88,7 +96,11 @@ export default function AutoInvestDashboard() {
     const smaSeries = chart.addLineSeries({ color: 'rgba(245, 158, 11, 0.8)', lineWidth: 2 });
     smaSeries.setData(movingAverage);
 
-    const handleResize = () => chart.applyOptions({ width: chartContainerRef.current?.clientWidth });
+    const handleResize = () => {
+      if (chartContainerRef.current) {
+        chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+      }
+    };
     const resizeObserver = new ResizeObserver(handleResize);
     resizeObserver.observe(chartContainerRef.current);
 
