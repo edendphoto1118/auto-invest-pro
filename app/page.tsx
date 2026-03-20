@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createChart, CrosshairMode, ColorType, Time } from "lightweight-charts";
-import { fetchStockData } from "./actions";
+import { fetchStockData, generateAIReport } from "./actions";
 
 interface CandleData {
   time: Time;
@@ -12,9 +12,6 @@ interface CandleData {
   close: number;
 }
 
-// ==========================================
-// 1. 核心演算法：自動計算布林通道 (Bollinger Bands)
-// ==========================================
 function calculateBollingerBands(data: CandleData[], period = 20, multiplier = 2) {
   const upperBand = [];
   const lowerBand = [];
@@ -22,11 +19,9 @@ function calculateBollingerBands(data: CandleData[], period = 20, multiplier = 2
 
   for (let i = 0; i < data.length; i++) {
     if (i < period - 1) continue;
-
     const slice = data.slice(i - period + 1, i + 1);
     const sum = slice.reduce((acc, val) => acc + val.close, 0);
     const sma = sum / period;
-
     const variance = slice.reduce((acc, val) => acc + Math.pow(val.close - sma, 2), 0) / period;
     const sd = Math.sqrt(variance);
 
@@ -34,55 +29,90 @@ function calculateBollingerBands(data: CandleData[], period = 20, multiplier = 2
     upperBand.push({ time: data[i].time, value: sma + sd * multiplier });
     lowerBand.push({ time: data[i].time, value: sma - sd * multiplier });
   }
-
   return { upperBand, lowerBand, movingAverage };
 }
 
-// ==========================================
-// 2. 儀表板主結構與圖表渲染
-// ==========================================
+// 訂閱制核心設定
+const FREE_TICKERS = ["AAPL", "2330.TW", "2330"]; // 只有這些開放免費查詢
+
 export default function AutoInvestDashboard() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const [isClient, setIsClient] = useState(false);
   
-  // 狀態管理 (Data State)
-  const [market, setMarket] = useState<"US" | "TW">("US"); // 新增：市場選擇狀態
+  // 使用者權限狀態 (MVP 測試用)
+  const [isProUser, setIsProUser] = useState(false); 
+  const [showPaywall, setShowPaywall] = useState(false);
+
+  const [market, setMarket] = useState<"US" | "TW">("US");
   const [tickerInput, setTickerInput] = useState("AAPL");
   const [currentTicker, setCurrentTicker] = useState("AAPL");
   const [stockData, setStockData] = useState<CandleData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiReport, setAiReport] = useState<{ diagnosis: string; action: string } | null>(null);
 
   useEffect(() => {
     setIsClient(true);
-    handleSearch("AAPL"); 
+    executeSearch("AAPL"); // 初始畫面載入免費標的
   }, []);
 
-  // 觸發資料抓取 (加入自動補全邏輯)
-  const handleSearch = async (targetTicker: string) => {
-    if (!targetTicker) return;
-    setIsLoading(true);
-    setErrorMsg("");
+  // 搜尋攔截器 (Paywall Gatekeeper)
+  const handleSearchClick = () => {
+    if (!tickerInput) return;
     
-    let finalTicker = targetTicker.trim().toUpperCase();
-    
-    // 防呆機制：如果選台股，且用戶沒有自己打 .TW，系統自動補上
-    if (market === "TW" && !finalTicker.includes(".")) {
-      finalTicker += ".TW";
+    let target = tickerInput.trim().toUpperCase();
+    if (market === "TW" && !target.includes(".")) target += ".TW";
+
+    // 權限判定：如果不是 Pro 用戶，且搜尋的標的不在免費名單內，就彈出付費牆
+    if (!isProUser && !FREE_TICKERS.includes(target)) {
+      setShowPaywall(true);
+      return; 
     }
+
+    setShowPaywall(false);
+    executeSearch(target);
+  };
+
+  // 實際執行搜尋的邏輯
+  const executeSearch = async (finalTicker: string) => {
+    setIsLoading(true);
+    setAiLoading(true);
+    setErrorMsg("");
+    setAiReport(null);
     
     const result = await fetchStockData(finalTicker);
     
     if (result.success && result.data) {
       setStockData(result.data);
       setCurrentTicker(finalTicker);
+      
+      const { upperBand, lowerBand, movingAverage } = calculateBollingerBands(result.data);
+      if (movingAverage.length > 0) {
+        const lastClose = result.data[result.data.length - 1].close;
+        const currentSMA = movingAverage[movingAverage.length - 1].value.toFixed(2);
+        const currentUpper = upperBand[upperBand.length - 1].value.toFixed(2);
+        const currentLower = lowerBand[lowerBand.length - 1].value.toFixed(2);
+        
+        const aiResult = await generateAIReport(finalTicker, {
+          lastClose, sma: currentSMA, upper: currentUpper, lower: currentLower
+        });
+
+        if (aiResult.success) {
+          setAiReport(aiResult.data);
+        } else {
+          setAiReport({ diagnosis: "運算失敗", action: "請重新整理或稍後再試。" });
+        }
+      }
     } else {
-      setErrorMsg(result.error || "發生未知錯誤，請確認代碼是否正確");
+      setErrorMsg(result.error || "發生未知錯誤");
     }
     setIsLoading(false);
+    setAiLoading(false);
   };
 
-  // 監聽數據變化並重新渲染圖表
+  // 圖表渲染邏輯
   useEffect(() => {
     if (!isClient || !chartContainerRef.current || stockData.length === 0) return;
 
@@ -104,10 +134,8 @@ export default function AutoInvestDashboard() {
 
     const upperSeries = chart.addLineSeries({ color: 'rgba(59, 130, 246, 0.5)', lineWidth: 1 });
     upperSeries.setData(upperBand);
-
     const lowerSeries = chart.addLineSeries({ color: 'rgba(59, 130, 246, 0.5)', lineWidth: 1 });
     lowerSeries.setData(lowerBand);
-
     const smaSeries = chart.addLineSeries({ color: 'rgba(245, 158, 11, 0.8)', lineWidth: 2 });
     smaSeries.setData(movingAverage);
 
@@ -127,53 +155,90 @@ export default function AutoInvestDashboard() {
   if (!isClient) return <div className="min-h-screen bg-gray-900" />;
 
   return (
-    <main className="min-h-screen bg-gray-900 p-8 text-white font-sans">
+    <main className="min-h-screen bg-gray-900 p-8 text-white font-sans relative">
+      {/* ========================================================
+        付費牆 (Paywall Overlay) - 阻擋未付費用戶
+        ========================================================
+      */}
+      {showPaywall && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/80 backdrop-blur-md p-4 transition-all">
+          <div className="bg-gray-800 border border-yellow-500/30 rounded-2xl shadow-2xl max-w-md w-full p-8 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-500/10 rounded-full blur-3xl -mr-10 -mt-10"></div>
+            
+            <div className="flex justify-center mb-6">
+              <span className="bg-yellow-500/20 text-yellow-400 p-3 rounded-full">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </span>
+            </div>
+            
+            <h2 className="text-2xl font-bold text-center text-white mb-2">解鎖 Auto-Invest Pro</h2>
+            <p className="text-gray-400 text-center text-sm mb-6">
+              免費版僅提供 AAPL 與 台積電 (2330) 查詢。<br/>
+              升級 Pro 即可解鎖全球股市 AI 分析與自選飆股診斷。
+            </p>
+            
+            <ul className="space-y-3 mb-8 text-sm text-gray-300">
+              <li className="flex items-center gap-2">
+                <span className="text-green-400">✓</span> 無限制查詢美股、台股所有代碼
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="text-green-400">✓</span> 解鎖頂級量化交易員 AI 邏輯
+              </li>
+              <li className="flex items-center gap-2">
+                <span className="text-green-400">✓</span> 無延遲市場報價與技術面診斷
+              </li>
+            </ul>
+
+            <button 
+              onClick={() => alert("目前為展示模式，下一步我們將串接真實 Stripe 金流！")}
+              className="w-full bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-400 hover:to-yellow-500 text-gray-900 font-bold py-3 rounded-lg transition-all shadow-lg hover:shadow-yellow-500/25"
+            >
+              升級解鎖 (NT$ 299 / 月)
+            </button>
+            
+            <button 
+              onClick={() => setShowPaywall(false)}
+              className="w-full text-center text-gray-500 hover:text-gray-300 text-sm mt-4 transition-colors"
+            >
+              先不用，我繼續看免費標的
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 儀表板主體 */}
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* 頂部控制列 */}
         <header className="flex flex-col md:flex-row justify-between items-start md:items-end border-b border-gray-700 pb-4 gap-4">
           <div className="mb-2 md:mb-0">
             <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-3">
               Auto-Invest Pro
+              {isProUser && <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded border border-yellow-500/30">PRO</span>}
               {isLoading && <span className="text-sm bg-blue-600/20 text-blue-400 px-2 py-1 rounded animate-pulse">抓取數據中...</span>}
             </h1>
             <p className="text-sm text-gray-400 mt-1">AI 智能投資儀表板 - 目前標的：<span className="text-blue-400 font-mono">{currentTicker}</span></p>
           </div>
           
           <div className="flex flex-col items-end gap-3 w-full md:w-auto">
-            {/* 新增：市場切換開關 (Segmented Control) */}
             <div className="flex bg-gray-800 rounded-lg p-1 border border-gray-700 w-full md:w-auto">
-              <button
-                onClick={() => { setMarket("US"); setTickerInput(""); }}
-                className={`flex-1 md:flex-none px-6 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
-                  market === "US" ? "bg-blue-600 text-white shadow-md" : "text-gray-400 hover:text-white hover:bg-gray-700"
-                }`}
-              >
+              <button onClick={() => { setMarket("US"); setTickerInput(""); }} className={`flex-1 md:flex-none px-6 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${market === "US" ? "bg-blue-600 text-white shadow-md" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}>
                 🇺🇸 美股
               </button>
-              <button
-                onClick={() => { setMarket("TW"); setTickerInput(""); }}
-                className={`flex-1 md:flex-none px-6 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${
-                  market === "TW" ? "bg-blue-600 text-white shadow-md" : "text-gray-400 hover:text-white hover:bg-gray-700"
-                }`}
-              >
+              <button onClick={() => { setMarket("TW"); setTickerInput(""); }} className={`flex-1 md:flex-none px-6 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ${market === "TW" ? "bg-blue-600 text-white shadow-md" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}>
                 🇹🇼 台股
               </button>
             </div>
-
-            {/* 搜尋列 */}
             <div className="flex gap-2 w-full md:w-auto">
               <input 
                 type="text" 
-                value={tickerInput}
-                onChange={(e) => setTickerInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearch(tickerInput)}
-                // 動態提示字元，依照選擇的市場改變
+                value={tickerInput} 
+                onChange={(e) => setTickerInput(e.target.value)} 
+                onKeyDown={(e) => e.key === 'Enter' && handleSearchClick()} 
                 placeholder={market === "US" ? "輸入美股代碼 (例: NVDA)" : "輸入台股股號 (例: 2330)"} 
                 className="bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 focus:outline-none focus:border-blue-500 w-full md:w-64 uppercase transition-colors" 
               />
               <button 
-                onClick={() => handleSearch(tickerInput)}
-                disabled={isLoading}
+                onClick={handleSearchClick} 
+                disabled={isLoading || aiLoading} 
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 px-6 py-2 rounded-lg font-medium transition-all shadow-md whitespace-nowrap"
               >
                 分析
@@ -183,7 +248,6 @@ export default function AutoInvestDashboard() {
           </div>
         </header>
 
-        {/* 圖表渲染區 */}
         <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden shadow-2xl relative">
           <div className="absolute top-4 left-4 z-10 flex gap-3 text-xs font-mono">
             <span className="bg-gray-900/80 px-2 py-1 rounded text-green-400 shadow backdrop-blur-sm">SMA 20</span>
@@ -192,35 +256,56 @@ export default function AutoInvestDashboard() {
           <div ref={chartContainerRef} className="w-full h-[500px]" />
         </div>
 
-        {/* AI 資訊區 */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
-             <h3 className="text-lg font-semibold mb-2">技術面診斷</h3>
-             <p className="text-gray-400 text-sm">請點擊上方按鈕載入目標，準備進行 AI 運算...</p>
+          <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg flex flex-col">
+             <h3 className="text-lg font-semibold mb-3 text-gray-100 border-b border-gray-700 pb-2">技術面診斷</h3>
+             <div className="flex-1 flex items-center">
+               {aiLoading ? (
+                 <p className="text-blue-400 text-sm animate-pulse">大腦運算中，正在解析價格行為...</p>
+               ) : (
+                 <p className="text-gray-300 text-sm leading-relaxed">{aiReport?.diagnosis || "等待輸入標的。"}</p>
+               )}
+             </div>
           </div>
           <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
-             <h3 className="text-lg font-semibold mb-2">近期高低點</h3>
+             <h3 className="text-lg font-semibold mb-3 text-gray-100 border-b border-gray-700 pb-2">量化數據基準</h3>
              {stockData.length > 0 ? (
-               <div className="text-sm text-gray-300 space-y-2 mt-4">
-                 <div className="flex justify-between border-b border-gray-700 pb-2">
-                    <span>最新收盤價</span>
-                    <span className="text-white font-mono font-medium">{stockData[stockData.length - 1].close}</span>
+               <div className="text-sm text-gray-300 space-y-3 mt-4">
+                 <div className="flex justify-between items-center bg-gray-900/50 p-2 rounded">
+                    <span>最新收盤</span>
+                    <span className="text-white font-mono font-medium text-base">{stockData[stockData.length - 1].close}</span>
                  </div>
-                 <div className="flex justify-between border-b border-gray-700 pb-2">
-                    <span>數據區間</span>
-                    <span className="text-white font-mono">{stockData.length} 個交易日</span>
+                 <div className="flex justify-between items-center px-2">
+                    <span className="text-gray-400">數據區間</span>
+                    <span className="text-gray-300 font-mono">{stockData.length} 日</span>
                  </div>
                </div>
              ) : (
-               <p className="text-gray-400 text-sm">等待數據載入...</p>
+               <p className="text-gray-400 text-sm mt-4">等待數據載入...</p>
              )}
           </div>
-          <div className="bg-blue-900/20 p-6 rounded-xl border border-blue-800 shadow-lg relative overflow-hidden">
+          <div className="bg-blue-900/20 p-6 rounded-xl border border-blue-800 shadow-lg relative overflow-hidden flex flex-col">
              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/10 rounded-full blur-2xl -mr-10 -mt-10"></div>
-             <h3 className="text-lg font-semibold mb-2 text-blue-400 relative z-10">💡 具體行動建議</h3>
-             <p className="text-blue-200/70 text-sm relative z-10">即將導入 LLM 模型進行策略生成...</p>
+             <h3 className="text-lg font-semibold mb-3 text-blue-400 relative z-10 border-b border-blue-800/50 pb-2">💡 策略與行動 (目標翻倍)</h3>
+             <div className="flex-1 flex items-center relative z-10">
+               {aiLoading ? (
+                 <p className="text-blue-300/70 text-sm animate-pulse">生成量化交易策略中...</p>
+               ) : (
+                 <p className="text-blue-100 text-sm leading-relaxed font-medium">{aiReport?.action || "等待輸入標的。"}</p>
+               )}
+             </div>
           </div>
         </div>
+      </div>
+
+      {/* 開發者專屬測試按鈕 (正式上線前可刪除) */}
+      <div className="fixed bottom-4 right-4 z-50">
+        <button 
+          onClick={() => setIsProUser(!isProUser)}
+          className="bg-gray-800 border border-gray-600 text-gray-400 text-xs px-3 py-1 rounded opacity-50 hover:opacity-100 transition-opacity"
+        >
+          測試模式：{isProUser ? "切換回免費用戶" : "一鍵解鎖 Pro"}
+        </button>
       </div>
     </main>
   );
