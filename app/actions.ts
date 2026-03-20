@@ -40,20 +40,32 @@ export async function generateAIReport(ticker: string, technicalData: any) {
     return { success: false, error: "系統未設定 API Key" };
   }
 
+  // 晉升為頂級量化交易員的系統提示詞
   const prompt = `
-你是一位頂級量化交易員。用戶的目標是「3年內資產翻倍」，這意味著你必須排除庸俗的建議，只給出高勝率、重風險控管的具體操作。
-目前標的：${ticker}
-最新技術面數據：
+你是一位以「風險控管與盈虧比」為核心的頂級量化交易員。
+目標受眾：資金有限，目標為「3年內資產翻倍」的投資人。
+目前分析標的：${ticker}
+
+【最新客觀數據】
 - 最新收盤價：${technicalData.lastClose}
 - 20日均線(SMA)：${technicalData.sma}
 - 布林通道上軌：${technicalData.upper}
 - 布林通道下軌：${technicalData.lower}
+- 近五日收盤價趨勢：${technicalData.recentTrend} (可判斷短期動能)
 
-請根據布林通道與均線的相對位置，給出極度簡潔的判斷。
-強制以 JSON 格式輸出，絕對不要包含 Markdown 語法或任何其他文字，格式如下：
+【核心任務】
+請根據上述數據，給出冷靜、無情、極具實戰價值的交易計畫。不要說廢話，不要給模稜兩可的建議。
+請務必輸出符合以下 JSON 格式的內容：
+
 {
-  "diagnosis": "用一句話精準點出目前的技術面位階（例如：價格跌破下軌，超賣訊號浮現 / 價格緊貼上軌，追高動能耗竭）。",
-  "action": "針對『3年翻倍』目標，給出具體資金配置建議（例如：切勿追高，等待回測 20ma 再佈局 20% 資金 / 左側建倉時機，可投入 10% 試單）。"
+  "trendStatus": "多頭強勢 / 空頭弱勢 / 盤整震盪 / 乖離過大風險區 (4選1)",
+  "winRateEstimate": "高 (適合建倉) / 中 (適合試單) / 低 (嚴格觀望)",
+  "diagnosis": "用一句話精準點出目前的技術面位階與隱患（例如：價格跌破下軌，超賣訊號浮現，但均線下彎需防破底）。",
+  "actionPlan": {
+    "entry": "具體的建議進場價位區間或條件 (例如：等待回測 ${technicalData.sma} 附近不破進場)",
+    "stopLoss": "具體的停損防守價位 (跌破何處必須認賠)",
+    "target": "短中期的停利目標價位"
+  }
 }
 `;
 
@@ -64,19 +76,27 @@ export async function generateAIReport(ticker: string, technicalData: any) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.2 }
+        generationConfig: { 
+          temperature: 0.1, // 極低溫度，確保分析理性且一致
+          responseMimeType: "application/json" // 【關鍵修復】強制 Google AI 只輸出純 JSON，徹底解決解析崩潰問題
+        }
       })
     });
 
     const result = await response.json();
-    const aiText = result.candidates[0].content.parts[0].text;
     
-    const cleanJsonString = aiText.replace(/```json\n?|\n?```/g, '').trim();
-    const parsedData = JSON.parse(cleanJsonString);
+    // API 回傳錯誤處理
+    if (result.error) {
+      console.error("Gemini API Error details:", result.error);
+      return { success: false, error: "AI API 金鑰無效或額度耗盡" };
+    }
+
+    const aiText = result.candidates[0].content.parts[0].text;
+    const parsedData = JSON.parse(aiText);
 
     return { success: true, data: parsedData };
   } catch (error) {
-    console.error("AI Error:", error);
-    return { success: false, error: "AI 運算超載，請稍後再試。" };
+    console.error("AI Parse Error:", error);
+    return { success: false, error: "大腦運算超載或格式錯誤，請稍後再試。" };
   }
 }
