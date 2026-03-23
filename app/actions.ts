@@ -40,7 +40,6 @@ export async function generateAIReport(ticker: string, technicalData: any) {
     return { success: false, error: "系統未設定 API Key" };
   }
 
-  // 晉升為頂級量化交易員的系統提示詞
   const prompt = `
 你是一位以「風險控管與盈虧比」為核心的頂級量化交易員。
 目標受眾：資金有限，目標為「3年內資產翻倍」的投資人。
@@ -51,7 +50,7 @@ export async function generateAIReport(ticker: string, technicalData: any) {
 - 20日均線(SMA)：${technicalData.sma}
 - 布林通道上軌：${technicalData.upper}
 - 布林通道下軌：${technicalData.lower}
-- 近五日收盤價趨勢：${technicalData.recentTrend} (可判斷短期動能)
+- 近五日收盤價趨勢：${technicalData.recentTrend}
 
 【核心任務】
 請根據上述數據，給出冷靜、無情、極具實戰價值的交易計畫。不要說廢話，不要給模稜兩可的建議。
@@ -62,7 +61,7 @@ export async function generateAIReport(ticker: string, technicalData: any) {
   "winRateEstimate": "高 (適合建倉) / 中 (適合試單) / 低 (嚴格觀望)",
   "diagnosis": "用一句話精準點出目前的技術面位階與隱患（例如：價格跌破下軌，超賣訊號浮現，但均線下彎需防破底）。",
   "actionPlan": {
-    "entry": "具體的建議進場價位區間或條件 (例如：等待回測 ${technicalData.sma} 附近不破進場)",
+    "entry": "具體的建議進場價位區間或條件",
     "stopLoss": "具體的停損防守價位 (跌破何處必須認賠)",
     "target": "短中期的停利目標價位"
   }
@@ -70,25 +69,25 @@ export async function generateAIReport(ticker: string, technicalData: any) {
 `;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // 【關鍵修復】將模型名稱強制指定為 gemini-1.5-flash-latest，避開 NOT_FOUND 錯誤
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { 
-          temperature: 0.1, // 極低溫度，確保分析理性且一致
-          responseMimeType: "application/json" // 【關鍵修復】強制 Google AI 只輸出純 JSON，徹底解決解析崩潰問題
+          temperature: 0.1, 
+          responseMimeType: "application/json" 
         }
       })
     });
 
     const result = await response.json();
     
-    // API 回傳錯誤處理
     if (result.error) {
       console.error("Gemini API Error details:", result.error);
-      return { success: false, error: "AI API 金鑰無效或額度耗盡" };
+      return { success: false, error: "AI API 拒絕存取，請確認金鑰權限。" };
     }
 
     const aiText = result.candidates[0].content.parts[0].text;
