@@ -37,7 +37,7 @@ export async function fetchStockData(ticker: string) {
 export async function generateAIReport(ticker: string, technicalData: any) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return { success: false, error: "[V5] Vercel 後台找不到金鑰" };
+    return { success: false, error: "[V6] Vercel 後台找不到金鑰" };
   }
 
   const prompt = `
@@ -69,8 +69,8 @@ export async function generateAIReport(ticker: string, technicalData: any) {
 `;
 
   try {
-    // 【終極方案】換上 100% 覆蓋率的通用模型 gemini-pro
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
+    // 【真相解藥】使用清單中確實存在的次世代模型 gemini-2.5-flash
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -85,7 +85,7 @@ export async function generateAIReport(ticker: string, technicalData: any) {
     if (result.error) {
       return { 
         success: false, 
-        error: `[V5] Google 攔截: ${result.error.message}` 
+        error: `[V6] Google 攔截: ${result.error.message}` 
       };
     }
 
@@ -95,6 +95,6 @@ export async function generateAIReport(ticker: string, technicalData: any) {
 
     return { success: true, data: parsedData };
   } catch (error: any) {
-    return { success: false, error: `[V5] 系統解析異常: ${error.message}` };
+    return { success: false, error: `[V6] 系統解析異常: ${error.message}` };
   }
 }
