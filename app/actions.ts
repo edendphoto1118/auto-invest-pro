@@ -37,7 +37,7 @@ export async function fetchStockData(ticker: string) {
 export async function generateAIReport(ticker: string, technicalData: any) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return { success: false, error: "Vercel 系統未設定 API Key" };
+    return { success: false, error: "[V3] Vercel 後台找不到金鑰，請檢查 Environment Variables" };
   }
 
   const prompt = `
@@ -69,35 +69,33 @@ export async function generateAIReport(ticker: string, technicalData: any) {
 `;
 
   try {
-    // 降級為最穩定的官方通用模型名稱
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { 
-          temperature: 0.1, 
-          responseMimeType: "application/json" 
-        }
+        // 移除強制 JSON 輸出限制，改為由程式碼自行清洗，最大化相容所有金鑰
+        generationConfig: { temperature: 0.1 } 
       })
     });
 
     const result = await response.json();
     
-    // 【終極除錯招式】直接把 Google 伺服器傳回的純英文錯誤理由，印在網頁畫面上
+    // 【暴力除錯】將 Google 傳回的真實錯誤直接丟到畫面上
     if (result.error) {
       return { 
         success: false, 
-        error: `Google 攔截原因: ${result.error.message || result.error.status}` 
+        error: `[V3] Google 攔截: ${result.error.message}` 
       };
     }
 
     const aiText = result.candidates[0].content.parts[0].text;
-    const parsedData = JSON.parse(aiText);
+    const cleanJsonString = aiText.replace(/```json\n?|\n?```/g, '').trim();
+    const parsedData = JSON.parse(cleanJsonString);
 
     return { success: true, data: parsedData };
   } catch (error: any) {
-    return { success: false, error: `系統解析異常: ${error.message}` };
+    return { success: false, error: `[V3] 系統解析異常: ${error.message}` };
   }
 }
