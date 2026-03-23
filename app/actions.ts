@@ -37,7 +37,7 @@ export async function fetchStockData(ticker: string) {
 export async function generateAIReport(ticker: string, technicalData: any) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return { success: false, error: "[V3] Vercel 後台找不到金鑰，請檢查 Environment Variables" };
+    return { success: false, error: "[V4] Vercel 後台找不到金鑰" };
   }
 
   const prompt = `
@@ -69,24 +69,23 @@ export async function generateAIReport(ticker: string, technicalData: any) {
 `;
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // 【終極修復】強制使用 -latest 動態節點，避開 404 路由迷失
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        // 移除強制 JSON 輸出限制，改為由程式碼自行清洗，最大化相容所有金鑰
         generationConfig: { temperature: 0.1 } 
       })
     });
 
     const result = await response.json();
     
-    // 【暴力除錯】將 Google 傳回的真實錯誤直接丟到畫面上
     if (result.error) {
       return { 
         success: false, 
-        error: `[V3] Google 攔截: ${result.error.message}` 
+        error: `[V4] Google 攔截: ${result.error.message}` 
       };
     }
 
@@ -96,6 +95,6 @@ export async function generateAIReport(ticker: string, technicalData: any) {
 
     return { success: true, data: parsedData };
   } catch (error: any) {
-    return { success: false, error: `[V3] 系統解析異常: ${error.message}` };
+    return { success: false, error: `[V4] 系統解析異常: ${error.message}` };
   }
 }
