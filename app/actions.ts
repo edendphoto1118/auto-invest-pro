@@ -37,7 +37,7 @@ export async function fetchStockData(ticker: string) {
 export async function generateAIReport(ticker: string, technicalData: any) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return { success: false, error: "系統未設定 API Key" };
+    return { success: false, error: "Vercel 系統未設定 API Key" };
   }
 
   const prompt = `
@@ -53,24 +53,24 @@ export async function generateAIReport(ticker: string, technicalData: any) {
 - 近五日收盤價趨勢：${technicalData.recentTrend}
 
 【核心任務】
-請根據上述數據，給出冷靜、無情、極具實戰價值的交易計畫。不要說廢話，不要給模稜兩可的建議。
+請根據上述數據，給出冷靜、無情、極具實戰價值的交易計畫。
 請務必輸出符合以下 JSON 格式的內容：
 
 {
   "trendStatus": "多頭強勢 / 空頭弱勢 / 盤整震盪 / 乖離過大風險區 (4選1)",
   "winRateEstimate": "高 (適合建倉) / 中 (適合試單) / 低 (嚴格觀望)",
-  "diagnosis": "用一句話精準點出目前的技術面位階與隱患（例如：價格跌破下軌，超賣訊號浮現，但均線下彎需防破底）。",
+  "diagnosis": "用一句話精準點出目前的技術面位階與隱患。",
   "actionPlan": {
     "entry": "具體的建議進場價位區間或條件",
-    "stopLoss": "具體的停損防守價位 (跌破何處必須認賠)",
+    "stopLoss": "具體的停損防守價位",
     "target": "短中期的停利目標價位"
   }
 }
 `;
 
   try {
-    // 【關鍵修復】將模型名稱強制指定為 gemini-1.5-flash-latest，避開 NOT_FOUND 錯誤
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+    // 降級為最穩定的官方通用模型名稱
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -85,17 +85,19 @@ export async function generateAIReport(ticker: string, technicalData: any) {
 
     const result = await response.json();
     
+    // 【終極除錯招式】直接把 Google 伺服器傳回的純英文錯誤理由，印在網頁畫面上
     if (result.error) {
-      console.error("Gemini API Error details:", result.error);
-      return { success: false, error: "AI API 拒絕存取，請確認金鑰權限。" };
+      return { 
+        success: false, 
+        error: `Google 攔截原因: ${result.error.message || result.error.status}` 
+      };
     }
 
     const aiText = result.candidates[0].content.parts[0].text;
     const parsedData = JSON.parse(aiText);
 
     return { success: true, data: parsedData };
-  } catch (error) {
-    console.error("AI Parse Error:", error);
-    return { success: false, error: "大腦運算超載或格式錯誤，請稍後再試。" };
+  } catch (error: any) {
+    return { success: false, error: `系統解析異常: ${error.message}` };
   }
 }
