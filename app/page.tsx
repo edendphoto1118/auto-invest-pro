@@ -141,7 +141,7 @@ export default function AutoInvestDashboard() {
             <div className="relative border-t border-slate-800 pt-6">
               <label className="text-xs text-slate-500 mb-2 block uppercase tracking-widest">Enter Access Code</label>
               <div className="flex gap-2">
-                <input type="text" value={inputCode} onChange={(e) => setInputCode(e.target.value)} placeholder="Code" className="flex-1 bg-slate-950 border border-slate-800 rounded-md px-4 py-2 text-sm uppercase focus:border-slate-600 outline-none transition-colors text-slate-300" />
+                <input type="text" value={tickerInput} onChange={(e) => setTickerInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearchClick()} placeholder={market === "US" ? "Ticker (e.g. NVDA)" : "Ticker (e.g. 2330)"} autoComplete="off" autoCorrect="off" spellCheck="false" data-form-type="other" className="bg-slate-900 border border-slate-800 rounded-md px-4 py-2 text-sm focus:outline-none focus:border-slate-600 w-full md:w-48 uppercase text-slate-200 placeholder-slate-600 transition-colors" />
                 <button onClick={handleUnlock} className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-md text-sm font-medium transition-colors text-slate-300">Verify</button>
               </div>
             </div>
