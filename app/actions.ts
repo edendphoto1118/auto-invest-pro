@@ -12,7 +12,6 @@ export async function fetchStockData(ticker: string) {
     const timestamps = result.timestamp;
     const quotes = result.indicators.quote[0];
     
-    // 【修復 1】明確告訴 Vercel 這是什麼型別的陣列，解決 Type Error
     const chartData: { time: string; open: number; high: number; low: number; close: number; volume: number }[] = [];
 
     for (let i = 0; i < timestamps.length; i++) {
@@ -24,7 +23,6 @@ export async function fetchStockData(ticker: string) {
           high: Number(quotes.high[i].toFixed(2)),
           low: Number(quotes.low[i].toFixed(2)),
           close: Number(quotes.close[i].toFixed(2)),
-          // 【修復 2】加上安全判定，避免某些冷門股沒有成交量導致當機
           volume: quotes.volume && quotes.volume[i] ? quotes.volume[i] : 0 
         });
       }
@@ -48,11 +46,13 @@ export async function fetchStockData(ticker: string) {
     }
     throw new Error('Not enough data to calculate trend');
   } catch (error) {
-    return { success: false, error: "無法取得資料，請確認代碼是否正確" };
+    // 【修復】移除 any，改用更嚴謹的錯誤判定
+    return { success: false, error: error instanceof Error ? error.message : "無法取得資料" };
   }
 }
 
-export async function generateAIReport(ticker: string, technicalData: any, lang: string) {
+// 【修復】把 technicalData 的型別定義清楚，不准用 any
+export async function generateAIReport(ticker: string, technicalData: Record<string, string | number>, lang: string) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { success: false, error: "Vercel 後台找不到金鑰" };
 
@@ -107,7 +107,7 @@ export async function generateAIReport(ticker: string, technicalData: any, lang:
     const parsedData = JSON.parse(cleanJsonString);
 
     return { success: true, data: parsedData };
-  } catch (error: any) {
-    return { success: false, error: `系統解析異常: ${error.message}` };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : "系統解析異常" };
   }
 }

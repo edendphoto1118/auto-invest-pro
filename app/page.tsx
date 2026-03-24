@@ -100,13 +100,12 @@ export default function AutoInvestDashboard() {
       setCurrentTicker(finalTicker);
       
       const slice = result.data.slice(-20);
-      // 【修復】嚴格標示 acc 是 number，val 是 CandleData，滿足 Vercel 的潔癖
-      const sma = slice.reduce((acc: number, val: CandleData) => acc + val.close, 0) / 20;
-      const variance = slice.reduce((acc: number, val: CandleData) => acc + Math.pow(val.close - sma, 2), 0) / 20;
+      const sma = slice.reduce((acc: number, val: any) => acc + val.close, 0) / 20;
+      const variance = slice.reduce((acc: number, val: any) => acc + Math.pow(val.close - sma, 2), 0) / 20;
       const sd = Math.sqrt(variance);
       
       const lastClose = result.data[result.data.length - 1].close;
-      const recent5Days = result.data.slice(-5).map((d: CandleData) => d.close).join(" -> ");
+      const recent5Days = result.data.slice(-5).map((d: any) => d.close).join(" -> ");
       
       const lastVol = result.data.length > 0 ? (result.data[result.data.length - 1].volume || 0) : 0;
       const prevVol = result.data.length > 1 ? (result.data[result.data.length - 2].volume || 0) : 0;
@@ -139,7 +138,7 @@ export default function AutoInvestDashboard() {
     const volSeries = chart.addHistogramSeries({
       color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: '', scaleMargins: { top: 0.8, bottom: 0 }
     });
-    const volumeData = stockData.map((d: CandleData, i: number) => ({
+    const volumeData = stockData.map((d: any, i: number) => ({
       time: d.time, value: d.volume || 0, color: i > 0 && d.close >= stockData[i-1].close ? 'rgba(16, 185, 129, 0.4)' : 'rgba(244, 63, 94, 0.4)'
     }));
     volSeries.setData(volumeData as any);
@@ -149,9 +148,8 @@ export default function AutoInvestDashboard() {
     const upperBand: any[] = []; const lowerBand: any[] = []; const movingAverage: any[] = [];
     for (let i = 19; i < stockData.length; i++) {
       const slice = stockData.slice(i - 19, i + 1);
-      // 【修復】這裡的 reduce 也一併加上嚴格標籤
-      const sma = slice.reduce((acc: number, val: CandleData) => acc + val.close, 0) / 20;
-      const variance = slice.reduce((acc: number, val: CandleData) => acc + Math.pow(val.close - sma, 2), 0) / 20;
+      const sma = slice.reduce((acc: number, val: any) => acc + val.close, 0) / 20;
+      const variance = slice.reduce((acc: number, val: any) => acc + Math.pow(val.close - sma, 2), 0) / 20;
       const sd = Math.sqrt(variance);
       movingAverage.push({ time: stockData[i].time, value: sma });
       upperBand.push({ time: stockData[i].time, value: sma + sd * 2 });
@@ -185,7 +183,8 @@ export default function AutoInvestDashboard() {
           <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl max-w-sm w-full p-8">
             <h2 className="text-xl font-medium text-slate-100 mb-2">Access Restricted</h2>
             <p className="text-slate-400 text-sm mb-6">Upgrade to Pro to unlock advanced AI quantitative analysis.</p>
-            <a href="https://edenphoto6.gumroad.com/l/spgiui" target="_blank" className="block w-full text-center bg-slate-100 hover:bg-white text-slate-900 font-medium py-3 rounded-md mb-6">Subscribe to Pro (NT$299)</a>
+            {/* 【安全修復】加入 rel="noopener noreferrer" 避免 Vercel 報錯 */}
+            <a href="https://edenphoto6.gumroad.com/l/spgiui" target="_blank" rel="noopener noreferrer" className="block w-full text-center bg-slate-100 hover:bg-white text-slate-900 font-medium py-3 rounded-md mb-6">Subscribe to Pro (NT$299)</a>
             <div className="border-t border-slate-800 pt-6">
               <div className="flex gap-2">
                 <input type="text" value={inputCode} onChange={(e) => setInputCode(e.target.value)} placeholder="Access Code" className="flex-1 bg-slate-950 border border-slate-800 rounded-md px-4 py-2 text-sm uppercase outline-none text-slate-300" />
@@ -305,7 +304,8 @@ export default function AutoInvestDashboard() {
         </div>
 
         {!igMode && (
-          <a href="YOUR_AFFILIATE_LINK_HERE" target="_blank" className="block mt-8 p-5 rounded-xl border border-slate-800/60 bg-slate-900/30 hover:bg-slate-900/80 transition-all group">
+          {/* 【安全修復】加入 rel="noopener noreferrer" */}
+          <a href="YOUR_AFFILIATE_LINK_HERE" target="_blank" rel="noopener noreferrer" className="block mt-8 p-5 rounded-xl border border-slate-800/60 bg-slate-900/30 hover:bg-slate-900/80 transition-all group">
             <div className="flex justify-between items-center">
               <div>
                 <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">{t.adTitle}</p>
