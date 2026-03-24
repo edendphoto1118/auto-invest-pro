@@ -135,9 +135,12 @@ export default function AutoInvestDashboard() {
     const candlestickSeries = chart.addCandlestickSeries({ upColor: '#10B981', downColor: '#F43F5E', borderVisible: false, wickUpColor: '#10B981', wickDownColor: '#F43F5E' });
     candlestickSeries.setData(stockData as any);
 
+    // 【修復】將 scaleMargins 移出 addHistogramSeries，並正確應用到圖表的 priceScale 上
     const volSeries = chart.addHistogramSeries({
-      color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: '', scaleMargins: { top: 0.8, bottom: 0 }
+      color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: ''
     });
+    chart.priceScale('').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+
     const volumeData = stockData.map((d: CandleData, i: number) => ({
       time: d.time, value: d.volume || 0, color: i > 0 && d.close >= stockData[i-1].close ? 'rgba(16, 185, 129, 0.4)' : 'rgba(244, 63, 94, 0.4)'
     }));
