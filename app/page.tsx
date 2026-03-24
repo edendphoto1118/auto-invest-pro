@@ -60,16 +60,16 @@ export default function AutoInvestDashboard() {
   const [igMode, setIgMode] = useState(false);
   const t = i18n[lang];
 
-  // 【新增】檢查 LocalStorage 記住密碼
   useEffect(() => { 
     setIsClient(true); 
     const savedCode = localStorage.getItem("edenProCode");
     if (savedCode === MONTHLY_PRO_CODE) setIsProUser(true);
     executeSearch("2330.TW"); 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSearchClick = (forceTicker?: string) => {
-    const targetInput = forceTicker || tickerInput;
+    const targetInput = typeof forceTicker === "string" ? forceTicker : tickerInput;
     if (!targetInput) return;
     let target = targetInput.trim().toUpperCase();
     if (market === "TW" && !target.includes(".")) target += ".TW";
@@ -84,7 +84,7 @@ export default function AutoInvestDashboard() {
     if (inputCode.trim().toUpperCase() === MONTHLY_PRO_CODE) {
       setIsProUser(true); 
       setShowPaywall(false);
-      localStorage.setItem("edenProCode", MONTHLY_PRO_CODE); // 【新增】存入記憶體
+      localStorage.setItem("edenProCode", MONTHLY_PRO_CODE); 
     } else {
       alert(lang === "TW" ? "解鎖碼無效或已過期！" : "Invalid Access Code.");
     }
@@ -100,16 +100,16 @@ export default function AutoInvestDashboard() {
       setCurrentTicker(finalTicker);
       
       const slice = result.data.slice(-20);
-      const sma = slice.reduce((acc, val) => acc + val.close, 0) / 20;
-      const variance = slice.reduce((acc, val) => acc + Math.pow(val.close - sma, 2), 0) / 20;
+      const sma = slice.reduce((acc: number, val: any) => acc + val.close, 0) / 20;
+      const variance = slice.reduce((acc: number, val: any) => acc + Math.pow(val.close - sma, 2), 0) / 20;
       const sd = Math.sqrt(variance);
       
       const lastClose = result.data[result.data.length - 1].close;
-      const recent5Days = result.data.slice(-5).map(d => d.close).join(" -> ");
+      const recent5Days = result.data.slice(-5).map((d: any) => d.close).join(" -> ");
       
-      // 量價判定給 AI
-      const lastVol = result.data[result.data.length - 1].volume || 0;
-      const prevVol = result.data[result.data.length - 2].volume || 0;
+      // 【修復 3】加上安全長度判定，避免陣列太短時抓取失敗報錯
+      const lastVol = result.data.length > 0 ? (result.data[result.data.length - 1].volume || 0) : 0;
+      const prevVol = result.data.length > 1 ? (result.data[result.data.length - 2].volume || 0) : 0;
       const volumeTrend = lastVol > prevVol * 1.5 ? "爆量" : lastVol < prevVol * 0.7 ? "量縮" : "穩定";
       
       const aiResult = await generateAIReport(finalTicker, {
@@ -121,7 +121,6 @@ export default function AutoInvestDashboard() {
     setIsLoading(false); setAiLoading(false);
   };
 
-  // 圖表渲染引擎
   useEffect(() => {
     if (!isClient || !chartContainerRef.current || stockData.length === 0) return;
     
@@ -137,7 +136,6 @@ export default function AutoInvestDashboard() {
     const candlestickSeries = chart.addCandlestickSeries({ upColor: '#10B981', downColor: '#F43F5E', borderVisible: false, wickUpColor: '#10B981', wickDownColor: '#F43F5E' });
     candlestickSeries.setData(stockData as any);
 
-    // 【新增】成交量柱狀圖 (只在老手模式顯示)
     const volSeries = chart.addHistogramSeries({
       color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: '', scaleMargins: { top: 0.8, bottom: 0 }
     });
@@ -148,7 +146,6 @@ export default function AutoInvestDashboard() {
     volumeSeriesRef.current = volSeries;
     volSeries.applyOptions({ visible: userMode === "VETERAN" });
 
-    // 布林通道
     const upperBand: any[] = []; const lowerBand: any[] = []; const movingAverage: any[] = [];
     for (let i = 19; i < stockData.length; i++) {
       const slice = stockData.slice(i - 19, i + 1);
@@ -167,9 +164,9 @@ export default function AutoInvestDashboard() {
     const handleResize = () => { if (chartContainerRef.current) chart.applyOptions({ width: chartContainerRef.current.clientWidth }); };
     window.addEventListener('resize', handleResize);
     return () => { window.removeEventListener('resize', handleResize); chart.remove(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isClient, stockData]);
 
-  // 切換模式時顯示/隱藏成交量
   useEffect(() => {
     if (volumeSeriesRef.current) {
       volumeSeriesRef.current.applyOptions({ visible: userMode === "VETERAN" });
@@ -211,7 +208,6 @@ export default function AutoInvestDashboard() {
               {isProUser && <span className="text-[10px] bg-emerald-950 text-emerald-400 px-2 py-1 rounded-sm border border-emerald-900/50 uppercase tracking-widest">Pro</span>}
             </div>
             
-            {/* 【新增】老手新手切換開關 */}
             <div className="flex bg-slate-900 rounded-md p-1 border border-slate-800 mt-3 w-fit">
               <button onClick={() => setUserMode("NOVICE")} className={`px-4 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${userMode === "NOVICE" ? "bg-slate-800 text-slate-200 shadow" : "text-slate-500 hover:text-slate-300"}`}>{t.modeNovice}</button>
               <button onClick={() => setUserMode("VETERAN")} className={`px-4 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${userMode === "VETERAN" ? "bg-slate-800 text-slate-200 shadow" : "text-slate-500 hover:text-slate-300"}`}>{t.modeVeteran}</button>
@@ -227,7 +223,6 @@ export default function AutoInvestDashboard() {
               <input type="text" value={tickerInput} onChange={(e) => setTickerInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearchClick()} placeholder={t.searchPh} autoComplete="off" autoCorrect="off" spellCheck="false" data-form-type="other" className="bg-slate-900 border border-slate-800 rounded-md px-4 py-2 text-sm focus:outline-none focus:border-slate-600 w-full md:w-56 uppercase text-slate-200 transition-colors" />
               <button onClick={() => handleSearchClick()} disabled={isLoading || aiLoading} className="bg-slate-200 hover:bg-white text-slate-900 px-6 py-2 rounded-md text-sm font-medium transition-colors">{t.analyze}</button>
             </div>
-            {/* 【新增】熱門標的快捷鍵 */}
             <div className="flex gap-2 mt-1">
               <span className="text-[10px] text-slate-500 py-1">🔥 Hot:</span>
               {['2330', '006208', 'NVDA', 'TSLA'].map(tick => (
@@ -240,7 +235,6 @@ export default function AutoInvestDashboard() {
         <div className={`flex justify-between items-end pb-2 border-b border-slate-800 ${igMode ? 'pt-6 px-2' : ''}`}>
           <div>
             <h2 className={`${igMode ? 'text-3xl' : 'text-4xl'} font-light text-slate-100`}>{currentTicker.replace('.TW', '')}</h2>
-            {/* 【修復】明確標示盤中/收盤 */}
             <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-widest">{igMode ? 'AI Snapshot' : t.quoteLabel}</p>
           </div>
           {quoteData && (
@@ -256,7 +250,6 @@ export default function AutoInvestDashboard() {
         <div className={`bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden relative ${igMode ? 'h-[240px]' : 'h-[400px]'}`}>
           {isLoading && <div className="absolute inset-0 z-20 pointer-events-none bg-gradient-to-b from-transparent via-slate-800/20 to-transparent h-full w-full animate-[scan_2s_ease-in-out_infinite]" />}
           <div className="absolute top-4 left-4 z-10 flex gap-3 text-[10px] font-mono tracking-widest">
-            {/* 【新增】新手模式專屬的白話文 Tooltip */}
             <span className="text-emerald-500/80 cursor-help" title={userMode === "NOVICE" ? "月均線：代表過去一個月多數人的平均買進成本" : ""}>SMA 20 {userMode === "NOVICE" && "[?]"}</span>
             <span className="text-sky-500/80 cursor-help" title={userMode === "NOVICE" ? "布林通道：統計學上的股價正常波動範圍" : ""}>BB 20,2 {userMode === "NOVICE" && "[?]"}</span>
             {userMode === "VETERAN" && <span className="text-teal-500/80">VOL</span>}

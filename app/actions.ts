@@ -11,7 +11,9 @@ export async function fetchStockData(ticker: string) {
     const result = data.chart.result[0];
     const timestamps = result.timestamp;
     const quotes = result.indicators.quote[0];
-    const chartData = [];
+    
+    // 【修復 1】明確告訴 Vercel 這是什麼型別的陣列，解決 Type Error
+    const chartData: { time: string; open: number; high: number; low: number; close: number; volume: number }[] = [];
 
     for (let i = 0; i < timestamps.length; i++) {
       if (quotes.close[i] !== null && quotes.open[i] !== null) {
@@ -22,12 +24,12 @@ export async function fetchStockData(ticker: string) {
           high: Number(quotes.high[i].toFixed(2)),
           low: Number(quotes.low[i].toFixed(2)),
           close: Number(quotes.close[i].toFixed(2)),
-          volume: quotes.volume[i] || 0 // 【新增】抓取成交量
+          // 【修復 2】加上安全判定，避免某些冷門股沒有成交量導致當機
+          volume: quotes.volume && quotes.volume[i] ? quotes.volume[i] : 0 
         });
       }
     }
 
-    // 【修復】精準計算單日漲跌幅，拒絕 Yahoo 1年前的假資料
     if (chartData.length >= 2) {
       const current = chartData[chartData.length - 1];
       const previous = chartData[chartData.length - 2];
@@ -50,9 +52,6 @@ export async function fetchStockData(ticker: string) {
   }
 }
 
-// ==========================================
-// 注入 AI 分析大腦 (Gemini API Native Fetch)
-// ==========================================
 export async function generateAIReport(ticker: string, technicalData: any, lang: string) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { success: false, error: "Vercel 後台找不到金鑰" };
