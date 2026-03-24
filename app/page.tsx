@@ -5,62 +5,55 @@ import { createChart, CrosshairMode, ColorType, Time } from "lightweight-charts"
 import { fetchStockData, generateAIReport } from "./actions";
 
 interface CandleData { time: Time; open: number; high: number; low: number; close: number; }
-interface AIReportData { trendStatus: string; winRateEstimate: string; diagnosis: string; actionPlan: { entry: string; stopLoss: string; target: string; }; }
+interface AIReportData { trendStatus: string; winRateEstimate: string; fundamentalSentiment: string; diagnosis: string; actionPlan: { entry: string; stopLoss: string; target: string; }; }
+interface QuoteData { price: string; change: string; changePercent: string; }
 
-function calculateBollingerBands(data: CandleData[], period = 20, multiplier = 2) {
-  const upperBand = []; const lowerBand = []; const movingAverage = [];
-  for (let i = 0; i < data.length; i++) {
-    if (i < period - 1) continue;
-    const slice = data.slice(i - period + 1, i + 1);
-    const sma = slice.reduce((acc, val) => acc + val.close, 0) / period;
-    const variance = slice.reduce((acc, val) => acc + Math.pow(val.close - sma, 2), 0) / period;
-    const sd = Math.sqrt(variance);
-    movingAverage.push({ time: data[i].time, value: sma });
-    upperBand.push({ time: data[i].time, value: sma + sd * multiplier });
-    lowerBand.push({ time: data[i].time, value: sma - sd * multiplier });
+// 雙語字典
+const i18n = {
+  TW: {
+    title: "量化決策終端", searchPh: "輸入股號 (例: 2330 或 006208)", analyze: "解析",
+    marketTW: "🇹🇼 台股", marketUS: "🇺🇸 美股",
+    sysDiag: "技術面核心診斷", fundDiag: "基本/籌碼面判定", action: "戰術執行腳本",
+    entry: "進場策略", stop: "嚴格停損", target: "目標停利",
+    adTitle: "專屬合作夥伴", adDesc: "使用專屬連結開立頂級證券帳戶，享零手續費與迎新優惠。"
+  },
+  EN: {
+    title: "Quant Terminal", searchPh: "Ticker (e.g. NVDA)", analyze: "Analyze",
+    marketTW: "🇹🇼 TW", marketUS: "🇺🇸 US",
+    sysDiag: "Technical Diagnosis", fundDiag: "Fundamental / Sentiment", action: "Action Protocol",
+    entry: "Entry Strategy", stop: "Strict Stop-Loss", target: "Take-Profit Target",
+    adTitle: "Partner Offer", adDesc: "Open a premium brokerage account to execute these strategies with zero commissions."
   }
-  return { upperBand, lowerBand, movingAverage };
-}
+};
 
-const FREE_TICKERS = ["AAPL", "2330.TW", "2330"];
+const FREE_TICKERS = ["AAPL", "2330.TW", "2330", "006208.TW", "006208"];
 const MONTHLY_PRO_CODE = "EDEN2026"; 
 
 export default function AutoInvestDashboard() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const [isClient, setIsClient] = useState(false);
+  
+  const [lang, setLang] = useState<"TW" | "EN">("TW");
+  const [market, setMarket] = useState<"TW" | "US">("TW");
+  const [tickerInput, setTickerInput] = useState("2330");
+  
   const [isProUser, setIsProUser] = useState(false); 
   const [showPaywall, setShowPaywall] = useState(false);
   const [inputCode, setInputCode] = useState("");
 
-  const [market, setMarket] = useState<"US" | "TW">("US");
-  const [tickerInput, setTickerInput] = useState("2330");
   const [currentTicker, setCurrentTicker] = useState("2330.TW");
   const [stockData, setStockData] = useState<CandleData[]>([]);
+  const [quoteData, setQuoteData] = useState<QuoteData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   
   const [aiLoading, setAiLoading] = useState(false);
   const [aiReport, setAiReport] = useState<AIReportData | null>(null);
-  const [aiError, setAiError] = useState("");
   
-  const [typedDiagnosis, setTypedDiagnosis] = useState("");
   const [igMode, setIgMode] = useState(false);
+  const t = i18n[lang];
 
   useEffect(() => { setIsClient(true); executeSearch("2330.TW"); }, []);
-
-  useEffect(() => {
-    if (aiReport && !aiLoading) {
-      setTypedDiagnosis("");
-      let i = 0;
-      const text = aiReport.diagnosis;
-      const timer = setInterval(() => {
-        setTypedDiagnosis(text.substring(0, i + 1));
-        i++;
-        if (i >= text.length) clearInterval(timer);
-      }, 20);
-      return () => clearInterval(timer);
-    }
-  }, [aiReport, aiLoading]);
 
   const handleSearchClick = () => {
     if (!tickerInput) return;
@@ -73,32 +66,29 @@ export default function AutoInvestDashboard() {
     setShowPaywall(false); executeSearch(target);
   };
 
-  const handleUnlock = () => {
-    if (inputCode.trim().toUpperCase() === MONTHLY_PRO_CODE) {
-      setIsProUser(true); setShowPaywall(false);
-    } else {
-      alert("Invalid Access Code.");
-    }
-  };
-
   const executeSearch = async (finalTicker: string) => {
-    setIsLoading(true); setAiLoading(true); setErrorMsg(""); setAiError(""); setAiReport(null);
+    setIsLoading(true); setAiLoading(true); setErrorMsg(""); setAiReport(null); setQuoteData(null);
     const result = await fetchStockData(finalTicker);
     
-    if (result.success && result.data) {
-      setStockData(result.data); setCurrentTicker(finalTicker);
-      const { upperBand, lowerBand, movingAverage } = calculateBollingerBands(result.data);
-      if (movingAverage.length > 0) {
-        const lastClose = result.data[result.data.length - 1].close;
-        const recent5Days = result.data.slice(-5).map(d => d.close).join(" -> ");
-        const aiResult = await generateAIReport(finalTicker, {
-          lastClose, sma: movingAverage[movingAverage.length - 1].value.toFixed(2), 
-          upper: upperBand[upperBand.length - 1].value.toFixed(2), 
-          lower: lowerBand[lowerBand.length - 1].value.toFixed(2), recentTrend: recent5Days
-        });
-        if (aiResult.success) setAiReport(aiResult.data);
-        else setAiError(aiResult.error || "Processing failed.");
-      }
+    if (result.success && result.data && result.quote) {
+      setStockData(result.data); 
+      setQuoteData(result.quote);
+      setCurrentTicker(finalTicker);
+      
+      const slice = result.data.slice(-20);
+      const sma = slice.reduce((acc, val) => acc + val.close, 0) / 20;
+      const variance = slice.reduce((acc, val) => acc + Math.pow(val.close - sma, 2), 0) / 20;
+      const sd = Math.sqrt(variance);
+      
+      const lastClose = result.data[result.data.length - 1].close;
+      const recent5Days = result.data.slice(-5).map(d => d.close).join(" -> ");
+      
+      // 【關鍵修復】確實傳遞 finalTicker, technicalData, lang 三個參數給後台
+      const aiResult = await generateAIReport(finalTicker, {
+        lastClose, sma: sma.toFixed(2), upper: (sma + sd * 2).toFixed(2), lower: (sma - sd * 2).toFixed(2), recentTrend: recent5Days
+      }, lang);
+      
+      if (aiResult.success) setAiReport(aiResult.data);
     } else { setErrorMsg(result.error || "Data retrieval failed."); }
     setIsLoading(false); setAiLoading(false);
   };
@@ -112,41 +102,31 @@ export default function AutoInvestDashboard() {
     });
     const candlestickSeries = chart.addCandlestickSeries({ upColor: '#10B981', downColor: '#F43F5E', borderVisible: false, wickUpColor: '#10B981', wickDownColor: '#F43F5E' });
     candlestickSeries.setData(stockData);
-    const { upperBand, lowerBand, movingAverage } = calculateBollingerBands(stockData);
-    chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.3)', lineWidth: 1 }).setData(upperBand);
-    chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.3)', lineWidth: 1 }).setData(lowerBand);
-    chart.addLineSeries({ color: 'rgba(234, 179, 8, 0.7)', lineWidth: 2 }).setData(movingAverage);
     chart.timeScale().fitContent();
-    
     const handleResize = () => { if (chartContainerRef.current) chart.applyOptions({ width: chartContainerRef.current.clientWidth }); };
     window.addEventListener('resize', handleResize);
     return () => { window.removeEventListener('resize', handleResize); chart.remove(); };
   }, [isClient, stockData]);
 
   if (!isClient) return <div className="min-h-screen bg-slate-950" />;
+  const isUp = quoteData && Number(quoteData.change) >= 0;
 
   return (
     <main className={`min-h-screen bg-slate-950 p-4 md:p-8 text-slate-200 font-sans tracking-wide transition-all ${igMode ? 'max-w-md mx-auto border border-slate-800 rounded-xl pb-20 mt-10 shadow-2xl' : ''}`}>
       
       {showPaywall && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-xl p-4 transition-all">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl max-w-sm w-full p-8 relative">
-            <h2 className="text-xl font-medium text-slate-100 mb-2 tracking-tight">Access Restricted</h2>
-            <p className="text-slate-400 text-sm mb-8 leading-relaxed">Upgrade to Pro to unlock advanced AI quantitative analysis and global market data.</p>
-            
-            <a href="https://edenphoto6.gumroad.com/l/spgiui" target="_blank" className="block w-full text-center bg-slate-100 hover:bg-white text-slate-900 font-medium py-3 rounded-md transition-colors text-sm mb-6">
-              Subscribe to Pro
-            </a>
-
-            <div className="relative border-t border-slate-800 pt-6">
-              <label className="text-xs text-slate-500 mb-2 block uppercase tracking-widest">Enter Access Code</label>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-xl p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl max-w-sm w-full p-8">
+            <h2 className="text-xl font-medium text-slate-100 mb-2">Access Restricted</h2>
+            <p className="text-slate-400 text-sm mb-6">Upgrade to Pro to unlock advanced AI quantitative analysis.</p>
+            <a href="https://edenphoto6.gumroad.com/l/spgiui" target="_blank" className="block w-full text-center bg-slate-100 hover:bg-white text-slate-900 font-medium py-3 rounded-md mb-6">Subscribe to Pro (NT$299)</a>
+            <div className="border-t border-slate-800 pt-6">
               <div className="flex gap-2">
-                <input type="text" value={tickerInput} onChange={(e) => setTickerInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearchClick()} placeholder={market === "US" ? "Ticker (e.g. NVDA)" : "Ticker (e.g. 2330)"} autoComplete="off" autoCorrect="off" spellCheck="false" data-form-type="other" className="bg-slate-900 border border-slate-800 rounded-md px-4 py-2 text-sm focus:outline-none focus:border-slate-600 w-full md:w-48 uppercase text-slate-200 placeholder-slate-600 transition-colors" />
-                <button onClick={handleUnlock} className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-md text-sm font-medium transition-colors text-slate-300">Verify</button>
+                <input type="text" value={inputCode} onChange={(e) => setInputCode(e.target.value)} placeholder="Access Code" className="flex-1 bg-slate-950 border border-slate-800 rounded-md px-4 py-2 text-sm uppercase outline-none text-slate-300" />
+                <button onClick={handleUnlock} className="bg-slate-800 px-4 py-2 rounded-md text-sm text-slate-300">Verify</button>
               </div>
             </div>
-            
-            <button onClick={() => setShowPaywall(false)} className="w-full text-center text-slate-500 hover:text-slate-400 text-xs mt-6 transition-colors">Return to free version</button>
+            <button onClick={() => setShowPaywall(false)} className="w-full text-center text-slate-500 text-xs mt-6">Cancel</button>
           </div>
         </div>
       )}
@@ -155,68 +135,88 @@ export default function AutoInvestDashboard() {
         
         <header className={`flex flex-col md:flex-row justify-between items-start md:items-end pb-6 gap-4 ${igMode ? 'hidden' : ''}`}>
           <div>
-            <h1 className="text-2xl font-light tracking-tight text-slate-100 flex items-center gap-3">
-              Auto-Invest<span className="font-semibold">Pro</span>
-              {isProUser && <span className="text-[10px] bg-emerald-950 text-emerald-400 px-2 py-0.5 rounded-sm border border-emerald-900/50 uppercase tracking-wider">Active</span>}
-            </h1>
-            <p className="text-xs text-slate-500 mt-2 uppercase tracking-widest">Quantitative AI Dashboard</p>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-2xl font-light tracking-tight text-slate-100">Auto-Invest<span className="font-semibold">Pro</span></h1>
+              <button onClick={() => setLang(lang === "TW" ? "EN" : "TW")} className="text-[10px] bg-slate-800 text-slate-400 px-2 py-1 rounded-sm border border-slate-700 hover:bg-slate-700 transition-colors">
+                {lang === "TW" ? "切換至 English" : "Switch to 中文"}
+              </button>
+              {isProUser && <span className="text-[10px] bg-emerald-950 text-emerald-400 px-2 py-1 rounded-sm border border-emerald-900/50 uppercase">Pro Active</span>}
+            </div>
+            <p className="text-xs text-slate-500 uppercase tracking-widest">{t.title}</p>
           </div>
           
           <div className="flex flex-col items-end gap-3 w-full md:w-auto">
             <div className="flex bg-slate-900 rounded-md p-1 w-full md:w-auto border border-slate-800">
-              <button onClick={() => { setMarket("US"); setTickerInput(""); }} className={`flex-1 px-6 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${market === "US" ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>US</button>
-              <button onClick={() => { setMarket("TW"); setTickerInput(""); }} className={`flex-1 px-6 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${market === "TW" ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>TW</button>
+              <button onClick={() => { setMarket("TW"); setTickerInput("2330"); }} className={`flex-1 px-6 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${market === "TW" ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{t.marketTW}</button>
+              <button onClick={() => { setMarket("US"); setTickerInput("NVDA"); }} className={`flex-1 px-6 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${market === "US" ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{t.marketUS}</button>
             </div>
             <div className="flex gap-2 w-full md:w-auto">
-              <input type="text" value={tickerInput} onChange={(e) => setTickerInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearchClick()} placeholder={market === "US" ? "Ticker (e.g. NVDA)" : "Ticker (e.g. 2330)"} className="bg-slate-900 border border-slate-800 rounded-md px-4 py-2 text-sm focus:outline-none focus:border-slate-600 w-full md:w-48 uppercase text-slate-200 placeholder-slate-600 transition-colors" />
-              <button onClick={handleSearchClick} disabled={isLoading || aiLoading} className="bg-slate-200 hover:bg-white text-slate-900 px-6 py-2 rounded-md text-sm font-medium transition-colors">Analyze</button>
+              {/* 【防護升級】加入 autoComplete="off" 等屬性徹底阻斷瀏覽器干擾 */}
+              <input type="text" value={tickerInput} onChange={(e) => setTickerInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearchClick()} placeholder={t.searchPh} autoComplete="off" autoCorrect="off" spellCheck="false" data-form-type="other" className="bg-slate-900 border border-slate-800 rounded-md px-4 py-2 text-sm focus:outline-none focus:border-slate-600 w-full md:w-56 uppercase text-slate-200 transition-colors" />
+              <button onClick={handleSearchClick} disabled={isLoading || aiLoading} className="bg-slate-200 hover:bg-white text-slate-900 px-6 py-2 rounded-md text-sm font-medium transition-colors">{t.analyze}</button>
             </div>
           </div>
         </header>
 
-        {igMode && (
-          <div className="text-left pt-6 pb-2 px-2 border-b border-slate-800">
-            <h2 className="text-3xl font-light text-slate-100">{currentTicker}</h2>
-            <p className="text-xs text-emerald-400/80 mt-1 uppercase tracking-widest">AI Market Diagnosis</p>
+        <div className={`flex justify-between items-end pb-2 border-b border-slate-800 ${igMode ? 'pt-6 px-2' : ''}`}>
+          <div>
+            <h2 className={`${igMode ? 'text-3xl' : 'text-4xl'} font-light text-slate-100`}>{currentTicker.replace('.TW', '')}</h2>
+            <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-widest">{igMode ? 'AI Snapshot' : 'Market Data'}</p>
           </div>
-        )}
+          {quoteData && (
+            <div className="text-right">
+              <div className="text-3xl font-medium text-slate-100">{quoteData.price}</div>
+              <div className={`text-sm tracking-wide ${isUp ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {isUp ? '+' : ''}{quoteData.change} ({isUp ? '+' : ''}{quoteData.changePercent}%)
+              </div>
+            </div>
+          )}
+        </div>
 
-        <div className={`bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden relative ${igMode ? 'h-[280px]' : 'h-[450px]'}`}>
+        <div className={`bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden relative ${igMode ? 'h-[240px]' : 'h-[400px]'}`}>
           {isLoading && <div className="absolute inset-0 z-20 pointer-events-none bg-gradient-to-b from-transparent via-slate-800/20 to-transparent h-full w-full animate-[scan_2s_ease-in-out_infinite]" />}
-          <div className="absolute top-4 left-4 z-10 flex gap-3 text-[10px] font-mono tracking-widest">
-            <span className="text-emerald-500/80">SMA 20</span>
-            <span className="text-sky-500/80">BB 20,2</span>
-          </div>
           <div ref={chartContainerRef} className="w-full h-full" />
         </div>
 
         <div className={`grid grid-cols-1 ${igMode ? 'gap-4' : 'md:grid-cols-12 gap-6'}`}>
-          <div className={`${igMode ? 'col-span-1' : 'md:col-span-5'} bg-slate-900/50 p-6 rounded-xl border border-slate-800`}>
-             <div className="flex justify-between items-center mb-4">
-               <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-widest">System Diagnosis</h3>
-               {aiReport && <span className={`text-[10px] px-2 py-0.5 rounded-sm border ${aiReport.trendStatus.includes("多") ? "bg-emerald-950/30 text-emerald-400 border-emerald-900/50" : "bg-rose-950/30 text-rose-400 border-rose-900/50"}`}>{aiReport.trendStatus}</span>}
+          <div className={`${igMode ? 'col-span-1' : 'md:col-span-6'} space-y-4`}>
+             <div className="bg-slate-900/50 p-5 rounded-xl border border-slate-800">
+               <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-3">{t.fundDiag}</h3>
+               <p className="text-slate-300 text-sm leading-relaxed font-light">
+                 {aiLoading ? <span className="animate-pulse text-slate-500">Retrieving macro data...</span> : aiReport?.fundamentalSentiment || "..."}
+               </p>
              </div>
-             <p className="text-slate-300 text-sm leading-loose min-h-[80px] font-light">
-               {aiLoading ? <span className="animate-pulse text-slate-500">Awaiting neural network response...</span> : aiError ? <span className="text-rose-400">{aiError}</span> : typedDiagnosis || "Input ticker to initialize."}
-             </p>
+             <div className="bg-slate-900/50 p-5 rounded-xl border border-slate-800">
+               <div className="flex justify-between items-center mb-3">
+                 <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">{t.sysDiag}</h3>
+                 {aiReport && <span className={`text-[10px] px-2 py-0.5 rounded-sm border ${aiReport.trendStatus.includes("多") || aiReport.trendStatus.includes("Bullish") ? "bg-emerald-950/30 text-emerald-400 border-emerald-900/50" : "bg-rose-950/30 text-rose-400 border-rose-900/50"}`}>{aiReport.trendStatus}</span>}
+               </div>
+               <p className="text-slate-300 text-sm leading-relaxed font-light">
+                 {aiLoading ? <span className="animate-pulse text-slate-500">Analyzing patterns...</span> : aiReport?.diagnosis || "..."}
+               </p>
+             </div>
           </div>
 
-          <div className={`${igMode ? 'col-span-1' : 'md:col-span-7'} bg-slate-900/50 p-6 rounded-xl border border-slate-800 flex flex-col justify-between`}>
-             <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4">Action Protocol</h3>
+          <div className={`${igMode ? 'col-span-1' : 'md:col-span-6'} bg-slate-900/50 p-6 rounded-xl border border-slate-800 flex flex-col justify-between`}>
+             <div className="flex justify-between items-center mb-6">
+                <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">{t.action}</h3>
+                {aiReport && <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-sm border border-slate-700">Win Rate: {aiReport.winRateEstimate}</span>}
+             </div>
+             
              {aiLoading ? <p className="text-slate-500 text-sm animate-pulse">Calculating optimal entry vectors...</p> : aiReport ? (
-               <div className="space-y-4 text-sm font-light">
-                 <div className="border-l-2 border-slate-700 pl-4 py-1">
-                   <span className="block text-[10px] text-slate-500 uppercase tracking-widest mb-1">Entry Strategy</span>
-                   <span className="text-slate-200">{aiReport.actionPlan.entry}</span>
+               <div className="space-y-5 text-sm font-light">
+                 <div className="border-l-2 border-slate-600 pl-4 py-1 bg-slate-800/20 rounded-r-md">
+                   <span className="block text-[10px] text-slate-500 uppercase tracking-widest mb-1">{t.entry}</span>
+                   <span className="text-slate-200 font-medium">{aiReport.actionPlan.entry}</span>
                  </div>
-                 <div className="grid grid-cols-2 gap-6 pt-2">
-                   <div className="border-l-2 border-rose-900/50 pl-4 py-1">
-                     <span className="block text-[10px] text-slate-500 uppercase tracking-widest mb-1">Strict Stop-Loss</span>
-                     <span className="text-rose-400 font-mono">{aiReport.actionPlan.stopLoss}</span>
+                 <div className="grid grid-cols-2 gap-4">
+                   <div className="border-l-2 border-rose-900/50 pl-4 py-2 bg-rose-950/10 rounded-r-md">
+                     <span className="block text-[10px] text-slate-500 uppercase tracking-widest mb-1">{t.stop}</span>
+                     <span className="text-rose-400 font-mono text-lg">{aiReport.actionPlan.stopLoss}</span>
                    </div>
-                   <div className="border-l-2 border-emerald-900/50 pl-4 py-1">
-                     <span className="block text-[10px] text-slate-500 uppercase tracking-widest mb-1">Target Take-Profit</span>
-                     <span className="text-emerald-400 font-mono">{aiReport.actionPlan.target}</span>
+                   <div className="border-l-2 border-emerald-900/50 pl-4 py-2 bg-emerald-950/10 rounded-r-md">
+                     <span className="block text-[10px] text-slate-500 uppercase tracking-widest mb-1">{t.target}</span>
+                     <span className="text-emerald-400 font-mono text-lg">{aiReport.actionPlan.target}</span>
                    </div>
                  </div>
                </div>
@@ -228,8 +228,8 @@ export default function AutoInvestDashboard() {
           <a href="YOUR_AFFILIATE_LINK_HERE" target="_blank" className="block mt-8 p-5 rounded-xl border border-slate-800/60 bg-slate-900/30 hover:bg-slate-900/80 transition-all group">
             <div className="flex justify-between items-center">
               <div>
-                <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Partner Offer</p>
-                <h4 className="text-sm text-slate-300 font-light">Open a premium brokerage account to execute these strategies with zero commissions.</h4>
+                <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">{t.adTitle}</p>
+                <h4 className="text-sm text-slate-300 font-light">{t.adDesc}</h4>
               </div>
               <span className="text-slate-600 group-hover:text-slate-300 transition-colors text-xl font-light">→</span>
             </div>
@@ -244,10 +244,7 @@ export default function AutoInvestDashboard() {
       </div>
 
       <style jsx global>{`
-        @keyframes scan {
-          0% { transform: translateY(-100%); }
-          100% { transform: translateY(100%); }
-        }
+        @keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
       `}</style>
     </main>
   );
