@@ -8,7 +8,6 @@ interface CandleData { time: Time; open: number; high: number; low: number; clos
 interface AIReportData { trendStatus: string; winRateEstimate: string; fundamentalSentiment: string; diagnosis: string; actionPlan: { entry: string; stopLoss: string; target: string; }; }
 interface QuoteData { price: string; change: string; changePercent: string; }
 
-// 雙語字典
 const i18n = {
   TW: {
     title: "量化決策終端", searchPh: "輸入股號 (例: 2330 或 006208)", analyze: "解析",
@@ -66,6 +65,16 @@ export default function AutoInvestDashboard() {
     setShowPaywall(false); executeSearch(target);
   };
 
+  // 【致命修復】把遺失的密碼驗證函數加回來！
+  const handleUnlock = () => {
+    if (inputCode.trim().toUpperCase() === MONTHLY_PRO_CODE) {
+      setIsProUser(true); 
+      setShowPaywall(false);
+    } else {
+      alert(lang === "TW" ? "解鎖碼無效或已過期！" : "Invalid Access Code.");
+    }
+  };
+
   const executeSearch = async (finalTicker: string) => {
     setIsLoading(true); setAiLoading(true); setErrorMsg(""); setAiReport(null); setQuoteData(null);
     const result = await fetchStockData(finalTicker);
@@ -83,7 +92,6 @@ export default function AutoInvestDashboard() {
       const lastClose = result.data[result.data.length - 1].close;
       const recent5Days = result.data.slice(-5).map(d => d.close).join(" -> ");
       
-      // 【關鍵修復】確實傳遞 finalTicker, technicalData, lang 三個參數給後台
       const aiResult = await generateAIReport(finalTicker, {
         lastClose, sma: sma.toFixed(2), upper: (sma + sd * 2).toFixed(2), lower: (sma - sd * 2).toFixed(2), recentTrend: recent5Days
       }, lang);
@@ -151,7 +159,6 @@ export default function AutoInvestDashboard() {
               <button onClick={() => { setMarket("US"); setTickerInput("NVDA"); }} className={`flex-1 px-6 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${market === "US" ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{t.marketUS}</button>
             </div>
             <div className="flex gap-2 w-full md:w-auto">
-              {/* 【防護升級】加入 autoComplete="off" 等屬性徹底阻斷瀏覽器干擾 */}
               <input type="text" value={tickerInput} onChange={(e) => setTickerInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearchClick()} placeholder={t.searchPh} autoComplete="off" autoCorrect="off" spellCheck="false" data-form-type="other" className="bg-slate-900 border border-slate-800 rounded-md px-4 py-2 text-sm focus:outline-none focus:border-slate-600 w-full md:w-56 uppercase text-slate-200 transition-colors" />
               <button onClick={handleSearchClick} disabled={isLoading || aiLoading} className="bg-slate-200 hover:bg-white text-slate-900 px-6 py-2 rounded-md text-sm font-medium transition-colors">{t.analyze}</button>
             </div>
