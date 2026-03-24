@@ -13,20 +13,30 @@ export async function fetchStockData(ticker: string) {
     const quotes = result.indicators.quote[0];
     
     const chartData: { time: string; open: number; high: number; low: number; close: number; volume: number }[] = [];
+    const seenTimes = new Set<string>(); // 【防禦 1】用來記錄出現過的日期，防止重複
 
     for (let i = 0; i < timestamps.length; i++) {
       if (quotes.close[i] !== null && quotes.open[i] !== null) {
         const date = new Date(timestamps[i] * 1000);
-        chartData.push({
-          time: date.toISOString().split('T')[0],
-          open: Number(quotes.open[i].toFixed(2)),
-          high: Number(quotes.high[i].toFixed(2)),
-          low: Number(quotes.low[i].toFixed(2)),
-          close: Number(quotes.close[i].toFixed(2)),
-          volume: quotes.volume && quotes.volume[i] ? quotes.volume[i] : 0 
-        });
+        const timeStr = date.toISOString().split('T')[0];
+        
+        // 【防禦 1】只把「沒出現過」的日期塞進去，滿足圖表套件的潔癖
+        if (!seenTimes.has(timeStr)) {
+          seenTimes.add(timeStr);
+          chartData.push({
+            time: timeStr,
+            open: Number(quotes.open[i].toFixed(2)),
+            high: Number(quotes.high[i].toFixed(2)),
+            low: Number(quotes.low[i].toFixed(2)),
+            close: Number(quotes.close[i].toFixed(2)),
+            volume: quotes.volume && quotes.volume[i] ? quotes.volume[i] : 0 
+          });
+        }
       }
     }
+
+    // 【防禦 2】強制依照時間先後順序重新排列，避免 Yahoo 資料亂序導致圖表當機
+    chartData.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
     if (chartData.length >= 2) {
       const current = chartData[chartData.length - 1];
@@ -46,12 +56,10 @@ export async function fetchStockData(ticker: string) {
     }
     throw new Error('Not enough data to calculate trend');
   } catch (error) {
-    // 【修復】移除 any，改用更嚴謹的錯誤判定
     return { success: false, error: error instanceof Error ? error.message : "無法取得資料" };
   }
 }
 
-// 【修復】把 technicalData 的型別定義清楚，不准用 any
 export async function generateAIReport(ticker: string, technicalData: Record<string, string | number>, lang: string) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { success: false, error: "Vercel 後台找不到金鑰" };
@@ -104,7 +112,20 @@ export async function generateAIReport(ticker: string, technicalData: Record<str
 
     const aiText = result.candidates[0].content.parts[0].text;
     const cleanJsonString = aiText.replace(/```json\n?|\n?```/g, '').trim();
-    const parsedData = JSON.parse(cleanJsonString);
+    let parsedData = JSON.parse(cleanJsonString);
+
+    // 【防禦 3】強制補齊 AI 可能漏掉的欄位，防止前台 React 讀不到屬性而當機
+    parsedData = {
+      trendStatus: parsedData.trendStatus || "運算中...",
+      winRateEstimate: parsedData.winRateEstimate || "-",
+      fundamentalSentiment: parsedData.fundamentalSentiment || "缺乏足夠資訊判定。",
+      diagnosis: parsedData.diagnosis || "技術面訊號微弱。",
+      actionPlan: {
+        entry: parsedData.actionPlan?.entry || "觀望",
+        stopLoss: parsedData.actionPlan?.stopLoss || "-",
+        target: parsedData.actionPlan?.target || "-"
+      }
+    };
 
     return { success: true, data: parsedData };
   } catch (error) {

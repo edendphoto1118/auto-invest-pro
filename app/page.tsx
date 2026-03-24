@@ -123,6 +123,8 @@ export default function AutoInvestDashboard() {
   useEffect(() => {
     if (!isClient || !chartContainerRef.current || stockData.length === 0) return;
     
+    // 【防禦 4】清空容器避免殘留節點導致圖表繪製當機
+    chartContainerRef.current.innerHTML = '';
     if (chartInstanceRef.current) { chartInstanceRef.current.remove(); }
 
     const chart = createChart(chartContainerRef.current, {
@@ -135,7 +137,6 @@ export default function AutoInvestDashboard() {
     const candlestickSeries = chart.addCandlestickSeries({ upColor: '#10B981', downColor: '#F43F5E', borderVisible: false, wickUpColor: '#10B981', wickDownColor: '#F43F5E' });
     candlestickSeries.setData(stockData as any);
 
-    // 【修復】將 scaleMargins 移出 addHistogramSeries，並正確應用到圖表的 priceScale 上
     const volSeries = chart.addHistogramSeries({
       color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: ''
     });
@@ -263,6 +264,7 @@ export default function AutoInvestDashboard() {
           <div className={`${igMode ? 'col-span-1' : 'md:col-span-6'} space-y-4`}>
              <div className="bg-slate-900/50 p-5 rounded-xl border border-slate-800">
                <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-3">{t.fundDiag}</h3>
+               {/* 【防護 5】加上問號安全讀取 */}
                <p className="text-slate-300 text-sm leading-relaxed font-light">
                  {aiLoading ? <span className="animate-pulse text-slate-500">Retrieving macro data...</span> : aiReport?.fundamentalSentiment || "..."}
                </p>
@@ -270,7 +272,7 @@ export default function AutoInvestDashboard() {
              <div className="bg-slate-900/50 p-5 rounded-xl border border-slate-800">
                <div className="flex justify-between items-center mb-3">
                  <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">{t.sysDiag}</h3>
-                 {aiReport && <span className={`text-[10px] px-2 py-0.5 rounded-sm border ${aiReport.trendStatus.includes("多") || aiReport.trendStatus.includes("Bullish") ? "bg-emerald-950/30 text-emerald-400 border-emerald-900/50" : "bg-rose-950/30 text-rose-400 border-rose-900/50"}`}>{aiReport.trendStatus}</span>}
+                 {aiReport && <span className={`text-[10px] px-2 py-0.5 rounded-sm border ${(aiReport?.trendStatus || "").includes("多") || (aiReport?.trendStatus || "").includes("Bullish") ? "bg-emerald-950/30 text-emerald-400 border-emerald-900/50" : "bg-rose-950/30 text-rose-400 border-rose-900/50"}`}>{aiReport?.trendStatus}</span>}
                </div>
                <p className="text-slate-300 text-sm leading-relaxed font-light">
                  {aiLoading ? <span className="animate-pulse text-slate-500">Analyzing patterns...</span> : aiReport?.diagnosis || "..."}
@@ -281,23 +283,23 @@ export default function AutoInvestDashboard() {
           <div className={`${igMode ? 'col-span-1' : 'md:col-span-6'} bg-slate-900/50 p-6 rounded-xl border border-slate-800 flex flex-col justify-between`}>
              <div className="flex justify-between items-center mb-6">
                 <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">{t.action}</h3>
-                {aiReport && <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-sm border border-slate-700">Win Rate: {aiReport.winRateEstimate}</span>}
+                {aiReport && <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-sm border border-slate-700">Win Rate: {aiReport?.winRateEstimate || "-"}</span>}
              </div>
              
              {aiLoading ? <p className="text-slate-500 text-sm animate-pulse">Calculating optimal entry vectors...</p> : aiReport ? (
                <div className="space-y-5 text-sm font-light">
                  <div className="border-l-2 border-slate-600 pl-4 py-1 bg-slate-800/20 rounded-r-md">
                    <span className="block text-[10px] text-slate-500 uppercase tracking-widest mb-1">{t.entry}</span>
-                   <span className="text-slate-200 font-medium">{aiReport.actionPlan.entry}</span>
+                   <span className="text-slate-200 font-medium">{aiReport?.actionPlan?.entry || "..."}</span>
                  </div>
                  <div className="grid grid-cols-2 gap-4">
                    <div className="border-l-2 border-rose-900/50 pl-4 py-2 bg-rose-950/10 rounded-r-md">
                      <span className="block text-[10px] text-slate-500 uppercase tracking-widest mb-1">{t.stop}</span>
-                     <span className="text-rose-400 font-mono text-lg">{aiReport.actionPlan.stopLoss}</span>
+                     <span className="text-rose-400 font-mono text-lg">{aiReport?.actionPlan?.stopLoss || "-"}</span>
                    </div>
                    <div className="border-l-2 border-emerald-900/50 pl-4 py-2 bg-emerald-950/10 rounded-r-md">
                      <span className="block text-[10px] text-slate-500 uppercase tracking-widest mb-1">{t.target}</span>
-                     <span className="text-emerald-400 font-mono text-lg">{aiReport.actionPlan.target}</span>
+                     <span className="text-emerald-400 font-mono text-lg">{aiReport?.actionPlan?.target || "-"}</span>
                    </div>
                  </div>
                </div>
