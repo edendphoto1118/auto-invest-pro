@@ -100,14 +100,14 @@ export default function AutoInvestDashboard() {
       setCurrentTicker(finalTicker);
       
       const slice = result.data.slice(-20);
-      const sma = slice.reduce((acc: number, val: any) => acc + val.close, 0) / 20;
-      const variance = slice.reduce((acc: number, val: any) => acc + Math.pow(val.close - sma, 2), 0) / 20;
+      // 【修復】嚴格標示 acc 是 number，val 是 CandleData，滿足 Vercel 的潔癖
+      const sma = slice.reduce((acc: number, val: CandleData) => acc + val.close, 0) / 20;
+      const variance = slice.reduce((acc: number, val: CandleData) => acc + Math.pow(val.close - sma, 2), 0) / 20;
       const sd = Math.sqrt(variance);
       
       const lastClose = result.data[result.data.length - 1].close;
-      const recent5Days = result.data.slice(-5).map((d: any) => d.close).join(" -> ");
+      const recent5Days = result.data.slice(-5).map((d: CandleData) => d.close).join(" -> ");
       
-      // 【修復 3】加上安全長度判定，避免陣列太短時抓取失敗報錯
       const lastVol = result.data.length > 0 ? (result.data[result.data.length - 1].volume || 0) : 0;
       const prevVol = result.data.length > 1 ? (result.data[result.data.length - 2].volume || 0) : 0;
       const volumeTrend = lastVol > prevVol * 1.5 ? "爆量" : lastVol < prevVol * 0.7 ? "量縮" : "穩定";
@@ -139,7 +139,7 @@ export default function AutoInvestDashboard() {
     const volSeries = chart.addHistogramSeries({
       color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: '', scaleMargins: { top: 0.8, bottom: 0 }
     });
-    const volumeData = stockData.map((d, i) => ({
+    const volumeData = stockData.map((d: CandleData, i: number) => ({
       time: d.time, value: d.volume || 0, color: i > 0 && d.close >= stockData[i-1].close ? 'rgba(16, 185, 129, 0.4)' : 'rgba(244, 63, 94, 0.4)'
     }));
     volSeries.setData(volumeData as any);
@@ -149,8 +149,9 @@ export default function AutoInvestDashboard() {
     const upperBand: any[] = []; const lowerBand: any[] = []; const movingAverage: any[] = [];
     for (let i = 19; i < stockData.length; i++) {
       const slice = stockData.slice(i - 19, i + 1);
-      const sma = slice.reduce((acc, val) => acc + val.close, 0) / 20;
-      const variance = slice.reduce((acc, val) => acc + Math.pow(val.close - sma, 2), 0) / 20;
+      // 【修復】這裡的 reduce 也一併加上嚴格標籤
+      const sma = slice.reduce((acc: number, val: CandleData) => acc + val.close, 0) / 20;
+      const variance = slice.reduce((acc: number, val: CandleData) => acc + Math.pow(val.close - sma, 2), 0) / 20;
       const sd = Math.sqrt(variance);
       movingAverage.push({ time: stockData[i].time, value: sma });
       upperBand.push({ time: stockData[i].time, value: sma + sd * 2 });
