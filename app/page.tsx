@@ -140,9 +140,9 @@ export default function AutoInvestDashboard() {
             <h2 className="text-2xl font-bold text-center text-white mb-2">解鎖 Auto-Invest Pro</h2>
             <p className="text-gray-400 text-center text-sm mb-6">免費版僅提供 AAPL 與 台積電 (2330)。<br/>升級解鎖全球股市 AI 量化策略。</p>
             
-            <a href="https://gumroad.com" target="_blank" className="block w-full text-center bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-400 hover:to-yellow-500 text-gray-900 font-bold py-3 rounded-lg transition-all shadow-lg mb-4">
-              💳 獲取本月解鎖碼 (NT$ 299)
-            </a>
+            <a href="https://edenphoto6.gumroad.com/l/spgiui" target="_blank" className="block w-full text-center bg-gradient-to-r from-yellow-500 to-yellow-600 hover:from-yellow-400 hover:to-yellow-500 text-gray-900 font-bold py-3 rounded-lg transition-all shadow-lg mb-4">
+  💳 獲取本月解鎖碼 (NT$ 299)
+</a>
 
             <div className="relative mt-6 border-t border-gray-700 pt-6">
               <label className="text-xs text-gray-400 mb-2 block">已訂閱？輸入 Email 收到的解鎖碼：</label>
