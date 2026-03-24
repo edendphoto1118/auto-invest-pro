@@ -22,26 +22,29 @@ export async function fetchStockData(ticker: string) {
           high: Number(quotes.high[i].toFixed(2)),
           low: Number(quotes.low[i].toFixed(2)),
           close: Number(quotes.close[i].toFixed(2)),
+          volume: quotes.volume[i] || 0 // 【新增】抓取成交量
         });
       }
     }
 
-    // 【新增】高效榨取隱藏的即時報價與漲跌幅數據
-    const meta = result.meta;
-    const currentPrice = meta.regularMarketPrice;
-    const previousClose = meta.chartPreviousClose;
-    const change = currentPrice - previousClose;
-    const changePercent = (change / previousClose) * 100;
+    // 【修復】精準計算單日漲跌幅，拒絕 Yahoo 1年前的假資料
+    if (chartData.length >= 2) {
+      const current = chartData[chartData.length - 1];
+      const previous = chartData[chartData.length - 2];
+      const change = current.close - previous.close;
+      const changePercent = (change / previous.close) * 100;
 
-    return { 
-      success: true, 
-      data: chartData,
-      quote: {
-        price: currentPrice.toFixed(2),
-        change: change.toFixed(2),
-        changePercent: changePercent.toFixed(2)
-      }
-    };
+      return { 
+        success: true, 
+        data: chartData,
+        quote: {
+          price: current.close.toFixed(2),
+          change: change.toFixed(2),
+          changePercent: changePercent.toFixed(2)
+        }
+      };
+    }
+    throw new Error('Not enough data to calculate trend');
   } catch (error) {
     return { success: false, error: "無法取得資料，請確認代碼是否正確" };
   }
@@ -52,30 +55,32 @@ export async function fetchStockData(ticker: string) {
 // ==========================================
 export async function generateAIReport(ticker: string, technicalData: any, lang: string) {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return { success: false, error: "Vercel 後台找不到金鑰" };
-  }
+  if (!apiKey) return { success: false, error: "Vercel 後台找不到金鑰" };
 
   const prompt = `
-你是一位頂級量化交易員。分析標的：${ticker}。
+你是一位華爾街頂級量化交易員與產業分析師。分析標的：${ticker}。
 回覆語言必須是：${lang === 'EN' ? 'English' : '繁體中文'}。
 
-【最新技術面數據】
+【系統最高級別警告】
+請絕對精確識別該代碼（${ticker}）對應的真實企業或 ETF 屬性。若為台股 2330 必須知道是半導體代工，006208 為台股大盤市值型 ETF。絕不允許將科技股誤認為傳產股，或產生任何幻覺。
+
+【最新技術面與量價數據】
 - 最新收盤價：${technicalData.lastClose}
 - 20日均線(SMA)：${technicalData.sma}
 - 布林通道上軌：${technicalData.upper}
 - 布林通道下軌：${technicalData.lower}
 - 近五日收盤價趨勢：${technicalData.recentTrend}
+- 今日成交量狀態：${technicalData.volumeTrend}
 
 【核心任務】
-請根據上述數據，結合你對該標的（如科技權值股或大盤ETF）的總體經濟、基本面與籌碼面認知，給出交易計畫。
+請根據上述真實數據，結合該標的的「真實產業基本面/籌碼面」認知，給出嚴謹的交易計畫。
 請務必輸出符合以下 JSON 格式的內容，不要包含 Markdown 語法：
 
 {
-  "trendStatus": "${lang === 'EN' ? 'Bullish / Bearish / Ranging / Overextended' : '多頭強勢 / 空頭弱勢 / 盤整震盪 / 乖離過大 (4選1)'}",
+  "trendStatus": "${lang === 'EN' ? 'Bullish / Bearish / Ranging / Overextended' : '多頭強勢 / 空頭弱勢 / 盤整震盪 / 乖離過大風險區 (4選1)'}",
   "winRateEstimate": "${lang === 'EN' ? 'High / Medium / Low' : '高 (適合建倉) / 中 (適合試單) / 低 (嚴格觀望)'}",
-  "fundamentalSentiment": "用一句話總結該標的近期的『基本面/籌碼面/消息面』綜合判定。",
-  "diagnosis": "用一句話精準點出目前的『技術面』位階與隱患。",
+  "fundamentalSentiment": "用一句話精準總結該標的（請帶入該產業或ETF的真實屬性）近期的『基本面/籌碼面』綜合判定。",
+  "diagnosis": "用一句話精準點出目前的『技術面與量價結構』位階與隱患。",
   "actionPlan": {
     "entry": "具體的建議進場價位區間或條件",
     "stopLoss": "具體的停損防守價位",

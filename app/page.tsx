@@ -4,24 +4,28 @@ import { useEffect, useRef, useState } from "react";
 import { createChart, CrosshairMode, ColorType, Time } from "lightweight-charts";
 import { fetchStockData, generateAIReport } from "./actions";
 
-interface CandleData { time: Time; open: number; high: number; low: number; close: number; }
+interface CandleData { time: Time; open: number; high: number; low: number; close: number; volume?: number; }
 interface AIReportData { trendStatus: string; winRateEstimate: string; fundamentalSentiment: string; diagnosis: string; actionPlan: { entry: string; stopLoss: string; target: string; }; }
 interface QuoteData { price: string; change: string; changePercent: string; }
 
 const i18n = {
   TW: {
-    title: "量化決策終端", searchPh: "輸入股號 (例: 2330 或 006208)", analyze: "解析",
+    title: "量化決策終端", searchPh: "輸入股號", analyze: "解析",
     marketTW: "🇹🇼 台股", marketUS: "🇺🇸 美股",
-    sysDiag: "技術面核心診斷", fundDiag: "基本/籌碼面判定", action: "戰術執行腳本",
+    sysDiag: "技術與量價診斷", fundDiag: "產業與籌碼判定", action: "戰術執行腳本",
     entry: "進場策略", stop: "嚴格停損", target: "目標停利",
-    adTitle: "專屬合作夥伴", adDesc: "使用專屬連結開立頂級證券帳戶，享零手續費與迎新優惠。"
+    adTitle: "專屬合作夥伴", adDesc: "使用專屬連結開立頂級證券帳戶，享零手續費與迎新優惠。",
+    modeNovice: "👶 新手引導模式", modeVeteran: "🧙‍♂️ 老手量化模式",
+    quoteLabel: "最新報價 (盤中/收盤)"
   },
   EN: {
-    title: "Quant Terminal", searchPh: "Ticker (e.g. NVDA)", analyze: "Analyze",
+    title: "Quant Terminal", searchPh: "Ticker", analyze: "Analyze",
     marketTW: "🇹🇼 TW", marketUS: "🇺🇸 US",
-    sysDiag: "Technical Diagnosis", fundDiag: "Fundamental / Sentiment", action: "Action Protocol",
+    sysDiag: "Technical & Volume", fundDiag: "Fundamental Sentiment", action: "Action Protocol",
     entry: "Entry Strategy", stop: "Strict Stop-Loss", target: "Take-Profit Target",
-    adTitle: "Partner Offer", adDesc: "Open a premium brokerage account to execute these strategies with zero commissions."
+    adTitle: "Partner Offer", adDesc: "Open a premium brokerage account to execute these strategies with zero commissions.",
+    modeNovice: "👶 Novice Mode", modeVeteran: "🧙‍♂️ Veteran Mode",
+    quoteLabel: "Latest Quote (Intraday/Close)"
   }
 };
 
@@ -30,11 +34,15 @@ const MONTHLY_PRO_CODE = "EDEN2026";
 
 export default function AutoInvestDashboard() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartInstanceRef = useRef<any>(null);
+  const volumeSeriesRef = useRef<any>(null);
+  
   const [isClient, setIsClient] = useState(false);
   
   const [lang, setLang] = useState<"TW" | "EN">("TW");
   const [market, setMarket] = useState<"TW" | "US">("TW");
-  const [tickerInput, setTickerInput] = useState("2330");
+  const [userMode, setUserMode] = useState<"NOVICE" | "VETERAN">("NOVICE");
+  const [tickerInput, setTickerInput] = useState("");
   
   const [isProUser, setIsProUser] = useState(false); 
   const [showPaywall, setShowPaywall] = useState(false);
@@ -52,11 +60,18 @@ export default function AutoInvestDashboard() {
   const [igMode, setIgMode] = useState(false);
   const t = i18n[lang];
 
-  useEffect(() => { setIsClient(true); executeSearch("2330.TW"); }, []);
+  // 【新增】檢查 LocalStorage 記住密碼
+  useEffect(() => { 
+    setIsClient(true); 
+    const savedCode = localStorage.getItem("edenProCode");
+    if (savedCode === MONTHLY_PRO_CODE) setIsProUser(true);
+    executeSearch("2330.TW"); 
+  }, []);
 
-  const handleSearchClick = () => {
-    if (!tickerInput) return;
-    let target = tickerInput.trim().toUpperCase();
+  const handleSearchClick = (forceTicker?: string) => {
+    const targetInput = forceTicker || tickerInput;
+    if (!targetInput) return;
+    let target = targetInput.trim().toUpperCase();
     if (market === "TW" && !target.includes(".")) target += ".TW";
 
     if (!isProUser && !FREE_TICKERS.includes(target)) {
@@ -65,11 +80,11 @@ export default function AutoInvestDashboard() {
     setShowPaywall(false); executeSearch(target);
   };
 
-  // 【致命修復】把遺失的密碼驗證函數加回來！
   const handleUnlock = () => {
     if (inputCode.trim().toUpperCase() === MONTHLY_PRO_CODE) {
       setIsProUser(true); 
       setShowPaywall(false);
+      localStorage.setItem("edenProCode", MONTHLY_PRO_CODE); // 【新增】存入記憶體
     } else {
       alert(lang === "TW" ? "解鎖碼無效或已過期！" : "Invalid Access Code.");
     }
@@ -92,8 +107,13 @@ export default function AutoInvestDashboard() {
       const lastClose = result.data[result.data.length - 1].close;
       const recent5Days = result.data.slice(-5).map(d => d.close).join(" -> ");
       
+      // 量價判定給 AI
+      const lastVol = result.data[result.data.length - 1].volume || 0;
+      const prevVol = result.data[result.data.length - 2].volume || 0;
+      const volumeTrend = lastVol > prevVol * 1.5 ? "爆量" : lastVol < prevVol * 0.7 ? "量縮" : "穩定";
+      
       const aiResult = await generateAIReport(finalTicker, {
-        lastClose, sma: sma.toFixed(2), upper: (sma + sd * 2).toFixed(2), lower: (sma - sd * 2).toFixed(2), recentTrend: recent5Days
+        lastClose, sma: sma.toFixed(2), upper: (sma + sd * 2).toFixed(2), lower: (sma - sd * 2).toFixed(2), recentTrend: recent5Days, volumeTrend
       }, lang);
       
       if (aiResult.success) setAiReport(aiResult.data);
@@ -101,20 +121,60 @@ export default function AutoInvestDashboard() {
     setIsLoading(false); setAiLoading(false);
   };
 
+  // 圖表渲染引擎
   useEffect(() => {
     if (!isClient || !chartContainerRef.current || stockData.length === 0) return;
+    
+    if (chartInstanceRef.current) { chartInstanceRef.current.remove(); }
+
     const chart = createChart(chartContainerRef.current, {
       layout: { background: { type: ColorType.Solid, color: '#0F172A' }, textColor: '#94A3B8' },
       grid: { vertLines: { color: '#1E293B', style: 1 }, horzLines: { color: '#1E293B', style: 1 } },
       crosshair: { mode: CrosshairMode.Normal }, rightPriceScale: { borderColor: '#334155' }, timeScale: { borderColor: '#334155', timeVisible: true },
     });
+    chartInstanceRef.current = chart;
+
     const candlestickSeries = chart.addCandlestickSeries({ upColor: '#10B981', downColor: '#F43F5E', borderVisible: false, wickUpColor: '#10B981', wickDownColor: '#F43F5E' });
-    candlestickSeries.setData(stockData);
+    candlestickSeries.setData(stockData as any);
+
+    // 【新增】成交量柱狀圖 (只在老手模式顯示)
+    const volSeries = chart.addHistogramSeries({
+      color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: '', scaleMargins: { top: 0.8, bottom: 0 }
+    });
+    const volumeData = stockData.map((d, i) => ({
+      time: d.time, value: d.volume || 0, color: i > 0 && d.close >= stockData[i-1].close ? 'rgba(16, 185, 129, 0.4)' : 'rgba(244, 63, 94, 0.4)'
+    }));
+    volSeries.setData(volumeData as any);
+    volumeSeriesRef.current = volSeries;
+    volSeries.applyOptions({ visible: userMode === "VETERAN" });
+
+    // 布林通道
+    const upperBand: any[] = []; const lowerBand: any[] = []; const movingAverage: any[] = [];
+    for (let i = 19; i < stockData.length; i++) {
+      const slice = stockData.slice(i - 19, i + 1);
+      const sma = slice.reduce((acc, val) => acc + val.close, 0) / 20;
+      const variance = slice.reduce((acc, val) => acc + Math.pow(val.close - sma, 2), 0) / 20;
+      const sd = Math.sqrt(variance);
+      movingAverage.push({ time: stockData[i].time, value: sma });
+      upperBand.push({ time: stockData[i].time, value: sma + sd * 2 });
+      lowerBand.push({ time: stockData[i].time, value: sma - sd * 2 });
+    }
+    chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.3)', lineWidth: 1 }).setData(upperBand);
+    chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.3)', lineWidth: 1 }).setData(lowerBand);
+    chart.addLineSeries({ color: 'rgba(234, 179, 8, 0.7)', lineWidth: 2 }).setData(movingAverage);
+
     chart.timeScale().fitContent();
     const handleResize = () => { if (chartContainerRef.current) chart.applyOptions({ width: chartContainerRef.current.clientWidth }); };
     window.addEventListener('resize', handleResize);
     return () => { window.removeEventListener('resize', handleResize); chart.remove(); };
   }, [isClient, stockData]);
+
+  // 切換模式時顯示/隱藏成交量
+  useEffect(() => {
+    if (volumeSeriesRef.current) {
+      volumeSeriesRef.current.applyOptions({ visible: userMode === "VETERAN" });
+    }
+  }, [userMode]);
 
   if (!isClient) return <div className="min-h-screen bg-slate-950" />;
   const isUp = quoteData && Number(quoteData.change) >= 0;
@@ -131,10 +191,10 @@ export default function AutoInvestDashboard() {
             <div className="border-t border-slate-800 pt-6">
               <div className="flex gap-2">
                 <input type="text" value={inputCode} onChange={(e) => setInputCode(e.target.value)} placeholder="Access Code" className="flex-1 bg-slate-950 border border-slate-800 rounded-md px-4 py-2 text-sm uppercase outline-none text-slate-300" />
-                <button onClick={handleUnlock} className="bg-slate-800 px-4 py-2 rounded-md text-sm text-slate-300">Verify</button>
+                <button onClick={handleUnlock} className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-md text-sm text-slate-300 transition-colors">Verify</button>
               </div>
             </div>
-            <button onClick={() => setShowPaywall(false)} className="w-full text-center text-slate-500 text-xs mt-6">Cancel</button>
+            <button onClick={() => setShowPaywall(false)} className="w-full text-center text-slate-500 hover:text-slate-400 text-xs mt-6 transition-colors">Cancel</button>
           </div>
         </div>
       )}
@@ -146,21 +206,33 @@ export default function AutoInvestDashboard() {
             <div className="flex items-center gap-3 mb-2">
               <h1 className="text-2xl font-light tracking-tight text-slate-100">Auto-Invest<span className="font-semibold">Pro</span></h1>
               <button onClick={() => setLang(lang === "TW" ? "EN" : "TW")} className="text-[10px] bg-slate-800 text-slate-400 px-2 py-1 rounded-sm border border-slate-700 hover:bg-slate-700 transition-colors">
-                {lang === "TW" ? "切換至 English" : "Switch to 中文"}
+                {lang === "TW" ? "EN" : "中文"}
               </button>
-              {isProUser && <span className="text-[10px] bg-emerald-950 text-emerald-400 px-2 py-1 rounded-sm border border-emerald-900/50 uppercase">Pro Active</span>}
+              {isProUser && <span className="text-[10px] bg-emerald-950 text-emerald-400 px-2 py-1 rounded-sm border border-emerald-900/50 uppercase tracking-widest">Pro</span>}
             </div>
-            <p className="text-xs text-slate-500 uppercase tracking-widest">{t.title}</p>
+            
+            {/* 【新增】老手新手切換開關 */}
+            <div className="flex bg-slate-900 rounded-md p-1 border border-slate-800 mt-3 w-fit">
+              <button onClick={() => setUserMode("NOVICE")} className={`px-4 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${userMode === "NOVICE" ? "bg-slate-800 text-slate-200 shadow" : "text-slate-500 hover:text-slate-300"}`}>{t.modeNovice}</button>
+              <button onClick={() => setUserMode("VETERAN")} className={`px-4 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${userMode === "VETERAN" ? "bg-slate-800 text-slate-200 shadow" : "text-slate-500 hover:text-slate-300"}`}>{t.modeVeteran}</button>
+            </div>
           </div>
           
           <div className="flex flex-col items-end gap-3 w-full md:w-auto">
             <div className="flex bg-slate-900 rounded-md p-1 w-full md:w-auto border border-slate-800">
-              <button onClick={() => { setMarket("TW"); setTickerInput("2330"); }} className={`flex-1 px-6 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${market === "TW" ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{t.marketTW}</button>
-              <button onClick={() => { setMarket("US"); setTickerInput("NVDA"); }} className={`flex-1 px-6 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${market === "US" ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{t.marketUS}</button>
+              <button onClick={() => { setMarket("TW"); setTickerInput(""); }} className={`flex-1 px-6 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${market === "TW" ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{t.marketTW}</button>
+              <button onClick={() => { setMarket("US"); setTickerInput(""); }} className={`flex-1 px-6 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${market === "US" ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{t.marketUS}</button>
             </div>
             <div className="flex gap-2 w-full md:w-auto">
               <input type="text" value={tickerInput} onChange={(e) => setTickerInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearchClick()} placeholder={t.searchPh} autoComplete="off" autoCorrect="off" spellCheck="false" data-form-type="other" className="bg-slate-900 border border-slate-800 rounded-md px-4 py-2 text-sm focus:outline-none focus:border-slate-600 w-full md:w-56 uppercase text-slate-200 transition-colors" />
-              <button onClick={handleSearchClick} disabled={isLoading || aiLoading} className="bg-slate-200 hover:bg-white text-slate-900 px-6 py-2 rounded-md text-sm font-medium transition-colors">{t.analyze}</button>
+              <button onClick={() => handleSearchClick()} disabled={isLoading || aiLoading} className="bg-slate-200 hover:bg-white text-slate-900 px-6 py-2 rounded-md text-sm font-medium transition-colors">{t.analyze}</button>
+            </div>
+            {/* 【新增】熱門標的快捷鍵 */}
+            <div className="flex gap-2 mt-1">
+              <span className="text-[10px] text-slate-500 py-1">🔥 Hot:</span>
+              {['2330', '006208', 'NVDA', 'TSLA'].map(tick => (
+                <button key={tick} onClick={() => { setTickerInput(tick); setMarket(tick.match(/[a-zA-Z]/) ? "US" : "TW"); handleSearchClick(tick); }} className="text-[10px] text-slate-400 hover:text-slate-200 bg-slate-900 border border-slate-800 px-2 py-1 rounded transition-colors">{tick}</button>
+              ))}
             </div>
           </div>
         </header>
@@ -168,7 +240,8 @@ export default function AutoInvestDashboard() {
         <div className={`flex justify-between items-end pb-2 border-b border-slate-800 ${igMode ? 'pt-6 px-2' : ''}`}>
           <div>
             <h2 className={`${igMode ? 'text-3xl' : 'text-4xl'} font-light text-slate-100`}>{currentTicker.replace('.TW', '')}</h2>
-            <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-widest">{igMode ? 'AI Snapshot' : 'Market Data'}</p>
+            {/* 【修復】明確標示盤中/收盤 */}
+            <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-widest">{igMode ? 'AI Snapshot' : t.quoteLabel}</p>
           </div>
           {quoteData && (
             <div className="text-right">
@@ -182,6 +255,12 @@ export default function AutoInvestDashboard() {
 
         <div className={`bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden relative ${igMode ? 'h-[240px]' : 'h-[400px]'}`}>
           {isLoading && <div className="absolute inset-0 z-20 pointer-events-none bg-gradient-to-b from-transparent via-slate-800/20 to-transparent h-full w-full animate-[scan_2s_ease-in-out_infinite]" />}
+          <div className="absolute top-4 left-4 z-10 flex gap-3 text-[10px] font-mono tracking-widest">
+            {/* 【新增】新手模式專屬的白話文 Tooltip */}
+            <span className="text-emerald-500/80 cursor-help" title={userMode === "NOVICE" ? "月均線：代表過去一個月多數人的平均買進成本" : ""}>SMA 20 {userMode === "NOVICE" && "[?]"}</span>
+            <span className="text-sky-500/80 cursor-help" title={userMode === "NOVICE" ? "布林通道：統計學上的股價正常波動範圍" : ""}>BB 20,2 {userMode === "NOVICE" && "[?]"}</span>
+            {userMode === "VETERAN" && <span className="text-teal-500/80">VOL</span>}
+          </div>
           <div ref={chartContainerRef} className="w-full h-full" />
         </div>
 
