@@ -13,14 +13,14 @@ export async function fetchStockData(ticker: string) {
     const quotes = result.indicators.quote[0];
     
     const chartData: { time: string; open: number; high: number; low: number; close: number; volume: number }[] = [];
-    const seenTimes = new Set<string>(); // 【防禦 1】用來記錄出現過的日期，防止重複
+    const seenTimes = new Set<string>(); // 【防護 1】建立日期過濾器，解決重複日期導致的黑屏
 
     for (let i = 0; i < timestamps.length; i++) {
       if (quotes.close[i] !== null && quotes.open[i] !== null) {
         const date = new Date(timestamps[i] * 1000);
         const timeStr = date.toISOString().split('T')[0];
         
-        // 【防禦 1】只把「沒出現過」的日期塞進去，滿足圖表套件的潔癖
+        // 只允許沒出現過的日期進入陣列
         if (!seenTimes.has(timeStr)) {
           seenTimes.add(timeStr);
           chartData.push({
@@ -35,7 +35,7 @@ export async function fetchStockData(ticker: string) {
       }
     }
 
-    // 【防禦 2】強制依照時間先後順序重新排列，避免 Yahoo 資料亂序導致圖表當機
+    // 【防護 2】強制依照時間先後排序，徹底根絕圖表亂序當機
     chartData.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
     if (chartData.length >= 2) {
@@ -114,7 +114,7 @@ export async function generateAIReport(ticker: string, technicalData: Record<str
     const cleanJsonString = aiText.replace(/```json\n?|\n?```/g, '').trim();
     let parsedData = JSON.parse(cleanJsonString);
 
-    // 【防禦 3】強制補齊 AI 可能漏掉的欄位，防止前台 React 讀不到屬性而當機
+    // 【防護 3】強制補齊 AI 漏掉的屬性，防止前台 React 讀取不到而白屏
     parsedData = {
       trendStatus: parsedData.trendStatus || "運算中...",
       winRateEstimate: parsedData.winRateEstimate || "-",

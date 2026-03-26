@@ -91,17 +91,24 @@ export default function AutoInvestDashboard() {
   };
 
   const executeSearch = async (finalTicker: string) => {
-    setIsLoading(true); setAiLoading(true); setErrorMsg(""); setAiReport(null); setQuoteData(null);
+    // 【修復】開始搜尋時，強制清空舊有的圖表資料與報價，就不會一直卡在台積電
+    setStockData([]);
+    setQuoteData(null);
+    setAiReport(null);
+    setErrorMsg(""); 
+    setIsLoading(true); 
+    setAiLoading(true); 
+    setCurrentTicker(finalTicker);
+    
     const result = await fetchStockData(finalTicker);
     
     if (result.success && result.data && result.quote) {
       setStockData(result.data); 
       setQuoteData(result.quote);
-      setCurrentTicker(finalTicker);
       
       const slice = result.data.slice(-20);
-      const sma = slice.reduce((acc: number, val: CandleData) => acc + val.close, 0) / 20;
-      const variance = slice.reduce((acc: number, val: CandleData) => acc + Math.pow(val.close - sma, 2), 0) / 20;
+      const sma = slice.length > 0 ? slice.reduce((acc: number, val: CandleData) => acc + val.close, 0) / slice.length : 0;
+      const variance = slice.length > 0 ? slice.reduce((acc: number, val: CandleData) => acc + Math.pow(val.close - sma, 2), 0) / slice.length : 0;
       const sd = Math.sqrt(variance);
       
       const lastClose = result.data[result.data.length - 1].close;
@@ -115,17 +122,29 @@ export default function AutoInvestDashboard() {
         lastClose, sma: sma.toFixed(2), upper: (sma + sd * 2).toFixed(2), lower: (sma - sd * 2).toFixed(2), recentTrend: recent5Days, volumeTrend
       }, lang);
       
-      if (aiResult.success) setAiReport(aiResult.data);
-    } else { setErrorMsg(result.error || "Data retrieval failed."); }
-    setIsLoading(false); setAiLoading(false);
+      if (aiResult.success) {
+        setAiReport(aiResult.data);
+      } else {
+        // AI 失敗時也顯示錯誤，不讓畫面空轉
+        setAiErrorMsg(aiResult.error);
+      }
+    } else { 
+      setErrorMsg(result.error || "Data retrieval failed."); 
+    }
+    setIsLoading(false); 
+    setAiLoading(false);
   };
+
+  const [aiErrorMsg, setAiErrorMsg] = useState("");
 
   useEffect(() => {
     if (!isClient || !chartContainerRef.current || stockData.length === 0) return;
     
-    // 【防禦 4】清空容器避免殘留節點導致圖表繪製當機
+    // 確保舊圖表徹底被拔除
     chartContainerRef.current.innerHTML = '';
-    if (chartInstanceRef.current) { chartInstanceRef.current.remove(); }
+    if (chartInstanceRef.current) { 
+      try { chartInstanceRef.current.remove(); } catch(e) {}
+    }
 
     const chart = createChart(chartContainerRef.current, {
       layout: { background: { type: ColorType.Solid, color: '#0F172A' }, textColor: '#94A3B8' },
@@ -150,23 +169,25 @@ export default function AutoInvestDashboard() {
     volSeries.applyOptions({ visible: userMode === "VETERAN" });
 
     const upperBand: any[] = []; const lowerBand: any[] = []; const movingAverage: any[] = [];
-    for (let i = 19; i < stockData.length; i++) {
-      const slice = stockData.slice(i - 19, i + 1);
-      const sma = slice.reduce((acc: number, val: CandleData) => acc + val.close, 0) / 20;
-      const variance = slice.reduce((acc: number, val: CandleData) => acc + Math.pow(val.close - sma, 2), 0) / 20;
-      const sd = Math.sqrt(variance);
-      movingAverage.push({ time: stockData[i].time, value: sma });
-      upperBand.push({ time: stockData[i].time, value: sma + sd * 2 });
-      lowerBand.push({ time: stockData[i].time, value: sma - sd * 2 });
+    if (stockData.length >= 20) {
+      for (let i = 19; i < stockData.length; i++) {
+        const slice = stockData.slice(i - 19, i + 1);
+        const sma = slice.reduce((acc: number, val: CandleData) => acc + val.close, 0) / 20;
+        const variance = slice.reduce((acc: number, val: CandleData) => acc + Math.pow(val.close - sma, 2), 0) / 20;
+        const sd = Math.sqrt(variance);
+        movingAverage.push({ time: stockData[i].time, value: sma });
+        upperBand.push({ time: stockData[i].time, value: sma + sd * 2 });
+        lowerBand.push({ time: stockData[i].time, value: sma - sd * 2 });
+      }
+      chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.3)', lineWidth: 1 }).setData(upperBand);
+      chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.3)', lineWidth: 1 }).setData(lowerBand);
+      chart.addLineSeries({ color: 'rgba(234, 179, 8, 0.7)', lineWidth: 2 }).setData(movingAverage);
     }
-    chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.3)', lineWidth: 1 }).setData(upperBand);
-    chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.3)', lineWidth: 1 }).setData(lowerBand);
-    chart.addLineSeries({ color: 'rgba(234, 179, 8, 0.7)', lineWidth: 2 }).setData(movingAverage);
 
     chart.timeScale().fitContent();
     const handleResize = () => { if (chartContainerRef.current) chart.applyOptions({ width: chartContainerRef.current.clientWidth }); };
     window.addEventListener('resize', handleResize);
-    return () => { window.removeEventListener('resize', handleResize); chart.remove(); };
+    return () => { window.removeEventListener('resize', handleResize); try { chart.remove(); } catch(e){} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isClient, stockData]);
 
@@ -252,6 +273,14 @@ export default function AutoInvestDashboard() {
 
         <div className={`bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden relative ${igMode ? 'h-[240px]' : 'h-[400px]'}`}>
           {isLoading && <div className="absolute inset-0 z-20 pointer-events-none bg-gradient-to-b from-transparent via-slate-800/20 to-transparent h-full w-full animate-[scan_2s_ease-in-out_infinite]" />}
+          
+          {/* 【防護】錯誤訊息顯示區，取代空轉的黑圖表 */}
+          {errorMsg && !isLoading && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900">
+               <p className="text-rose-400 font-mono text-sm bg-rose-950/30 px-4 py-2 rounded border border-rose-900/50">⚠ {errorMsg}</p>
+            </div>
+          )}
+
           <div className="absolute top-4 left-4 z-10 flex gap-3 text-[10px] font-mono tracking-widest">
             <span className="text-emerald-500/80 cursor-help" title={userMode === "NOVICE" ? "月均線：代表過去一個月多數人的平均買進成本" : ""}>SMA 20 {userMode === "NOVICE" && "[?]"}</span>
             <span className="text-sky-500/80 cursor-help" title={userMode === "NOVICE" ? "布林通道：統計學上的股價正常波動範圍" : ""}>BB 20,2 {userMode === "NOVICE" && "[?]"}</span>
@@ -264,9 +293,8 @@ export default function AutoInvestDashboard() {
           <div className={`${igMode ? 'col-span-1' : 'md:col-span-6'} space-y-4`}>
              <div className="bg-slate-900/50 p-5 rounded-xl border border-slate-800">
                <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-3">{t.fundDiag}</h3>
-               {/* 【防護 5】加上問號安全讀取 */}
                <p className="text-slate-300 text-sm leading-relaxed font-light">
-                 {aiLoading ? <span className="animate-pulse text-slate-500">Retrieving macro data...</span> : aiReport?.fundamentalSentiment || "..."}
+                 {aiLoading ? <span className="animate-pulse text-slate-500">Retrieving macro data...</span> : aiReport?.fundamentalSentiment || aiErrorMsg || "等待分析..."}
                </p>
              </div>
              <div className="bg-slate-900/50 p-5 rounded-xl border border-slate-800">
@@ -275,7 +303,7 @@ export default function AutoInvestDashboard() {
                  {aiReport && <span className={`text-[10px] px-2 py-0.5 rounded-sm border ${(aiReport?.trendStatus || "").includes("多") || (aiReport?.trendStatus || "").includes("Bullish") ? "bg-emerald-950/30 text-emerald-400 border-emerald-900/50" : "bg-rose-950/30 text-rose-400 border-rose-900/50"}`}>{aiReport?.trendStatus}</span>}
                </div>
                <p className="text-slate-300 text-sm leading-relaxed font-light">
-                 {aiLoading ? <span className="animate-pulse text-slate-500">Analyzing patterns...</span> : aiReport?.diagnosis || "..."}
+                 {aiLoading ? <span className="animate-pulse text-slate-500">Analyzing patterns...</span> : aiReport?.diagnosis || aiErrorMsg || "等待分析..."}
                </p>
              </div>
           </div>
