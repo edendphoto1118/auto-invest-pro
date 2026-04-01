@@ -12,20 +12,18 @@ const i18n = {
   TW: {
     title: "量化決策終端", searchPh: "輸入股號", analyze: "解析",
     marketTW: "🇹🇼 台股", marketUS: "🇺🇸 美股",
-    sysDiag: "技術與量價診斷", fundDiag: "產業與籌碼判定", action: "戰術執行腳本",
+    sysDiag: "技術與量價診斷", fundDiag: "產業籌碼與事件雷達", action: "戰術執行腳本",
     entry: "進場策略", stop: "嚴格停損", target: "目標停利",
-    adTitle: "專屬合作夥伴", adDesc: "使用專屬連結開立頂級證券帳戶，享零手續費與迎新優惠。",
-    modeNovice: "👶 新手引導模式", modeVeteran: "🧙‍♂️ 老手量化模式",
+    modeNovice: "👶 新手引導", modeVeteran: "🧙‍♂️ 老手量化",
     quoteLabel: "最新報價 (盤中/收盤)"
   },
   EN: {
     title: "Quant Terminal", searchPh: "Ticker", analyze: "Analyze",
     marketTW: "🇹🇼 TW", marketUS: "🇺🇸 US",
-    sysDiag: "Technical & Volume", fundDiag: "Fundamental Sentiment", action: "Action Protocol",
+    sysDiag: "Technical & Volume", fundDiag: "Sentiment & Catalyst", action: "Action Protocol",
     entry: "Entry Strategy", stop: "Strict Stop-Loss", target: "Take-Profit Target",
-    adTitle: "Partner Offer", adDesc: "Open a premium brokerage account to execute these strategies with zero commissions.",
-    modeNovice: "👶 Novice Mode", modeVeteran: "🧙‍♂️ Veteran Mode",
-    quoteLabel: "Latest Quote (Intraday/Close)"
+    modeNovice: "👶 Novice", modeVeteran: "🧙‍♂️ Veteran",
+    quoteLabel: "Latest Quote"
   }
 };
 
@@ -38,7 +36,6 @@ export default function AutoInvestDashboard() {
   const volumeSeriesRef = useRef<any>(null);
   
   const [isClient, setIsClient] = useState(false);
-  
   const [lang, setLang] = useState<"TW" | "EN">("TW");
   const [market, setMarket] = useState<"TW" | "US">("TW");
   const [userMode, setUserMode] = useState<"NOVICE" | "VETERAN">("NOVICE");
@@ -53,17 +50,25 @@ export default function AutoInvestDashboard() {
   const [quoteData, setQuoteData] = useState<QuoteData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  
   const [aiLoading, setAiLoading] = useState(false);
   const [aiReport, setAiReport] = useState<AIReportData | null>(null);
-  
+  const [aiErrorMsg, setAiErrorMsg] = useState("");
   const [igMode, setIgMode] = useState(false);
+  
+  // 【新增功能 A】Watchlist 記憶狀態
+  const [watchlist, setWatchlist] = useState<string[]>([]);
+  
   const t = i18n[lang];
 
   useEffect(() => { 
     setIsClient(true); 
     const savedCode = localStorage.getItem("edenProCode");
     if (savedCode === MONTHLY_PRO_CODE) setIsProUser(true);
+    
+    // 讀取自選股記憶
+    const savedWatchlist = localStorage.getItem("edenWatchlist");
+    if (savedWatchlist) setWatchlist(JSON.parse(savedWatchlist));
+
     executeSearch("2330.TW"); 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -80,6 +85,15 @@ export default function AutoInvestDashboard() {
     setShowPaywall(false); executeSearch(target);
   };
 
+  // 【新增功能 A】加入/移除自選股
+  const toggleWatchlist = (ticker: string) => {
+    let newWl = [];
+    if (watchlist.includes(ticker)) newWl = watchlist.filter(t => t !== ticker);
+    else newWl = [...watchlist, ticker];
+    setWatchlist(newWl);
+    localStorage.setItem("edenWatchlist", JSON.stringify(newWl));
+  };
+
   const handleUnlock = () => {
     if (inputCode.trim().toUpperCase() === MONTHLY_PRO_CODE) {
       setIsProUser(true); 
@@ -91,20 +105,13 @@ export default function AutoInvestDashboard() {
   };
 
   const executeSearch = async (finalTicker: string) => {
-    // 【修復】開始搜尋時，強制清空舊有的圖表資料與報價，就不會一直卡在台積電
-    setStockData([]);
-    setQuoteData(null);
-    setAiReport(null);
-    setErrorMsg(""); 
-    setIsLoading(true); 
-    setAiLoading(true); 
-    setCurrentTicker(finalTicker);
+    setStockData([]); setQuoteData(null); setAiReport(null); setErrorMsg(""); setAiErrorMsg("");
+    setIsLoading(true); setAiLoading(true); setCurrentTicker(finalTicker);
     
     const result = await fetchStockData(finalTicker);
     
     if (result.success && result.data && result.quote) {
-      setStockData(result.data); 
-      setQuoteData(result.quote);
+      setStockData(result.data); setQuoteData(result.quote);
       
       const slice = result.data.slice(-20);
       const sma = slice.length > 0 ? slice.reduce((acc: number, val: CandleData) => acc + val.close, 0) / slice.length : 0;
@@ -113,7 +120,6 @@ export default function AutoInvestDashboard() {
       
       const lastClose = result.data[result.data.length - 1].close;
       const recent5Days = result.data.slice(-5).map((d: CandleData) => d.close).join(" -> ");
-      
       const lastVol = result.data.length > 0 ? (result.data[result.data.length - 1].volume || 0) : 0;
       const prevVol = result.data.length > 1 ? (result.data[result.data.length - 2].volume || 0) : 0;
       const volumeTrend = lastVol > prevVol * 1.5 ? "爆量" : lastVol < prevVol * 0.7 ? "量縮" : "穩定";
@@ -122,29 +128,18 @@ export default function AutoInvestDashboard() {
         lastClose, sma: sma.toFixed(2), upper: (sma + sd * 2).toFixed(2), lower: (sma - sd * 2).toFixed(2), recentTrend: recent5Days, volumeTrend
       }, lang);
       
-      if (aiResult.success) {
-        setAiReport(aiResult.data);
-      } else {
-        // AI 失敗時也顯示錯誤，不讓畫面空轉
-        setAiErrorMsg(aiResult.error);
-      }
+      if (aiResult.success) setAiReport(aiResult.data);
+      else setAiErrorMsg(aiResult.error);
     } else { 
       setErrorMsg(result.error || "Data retrieval failed."); 
     }
-    setIsLoading(false); 
-    setAiLoading(false);
+    setIsLoading(false); setAiLoading(false);
   };
-
-  const [aiErrorMsg, setAiErrorMsg] = useState("");
 
   useEffect(() => {
     if (!isClient || !chartContainerRef.current || stockData.length === 0) return;
-    
-    // 確保舊圖表徹底被拔除
     chartContainerRef.current.innerHTML = '';
-    if (chartInstanceRef.current) { 
-      try { chartInstanceRef.current.remove(); } catch(e) {}
-    }
+    if (chartInstanceRef.current) { try { chartInstanceRef.current.remove(); } catch(e) {} }
 
     const chart = createChart(chartContainerRef.current, {
       layout: { background: { type: ColorType.Solid, color: '#0F172A' }, textColor: '#94A3B8' },
@@ -156,14 +151,9 @@ export default function AutoInvestDashboard() {
     const candlestickSeries = chart.addCandlestickSeries({ upColor: '#10B981', downColor: '#F43F5E', borderVisible: false, wickUpColor: '#10B981', wickDownColor: '#F43F5E' });
     candlestickSeries.setData(stockData as any);
 
-    const volSeries = chart.addHistogramSeries({
-      color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: ''
-    });
+    const volSeries = chart.addHistogramSeries({ color: '#26a69a', priceFormat: { type: 'volume' }, priceScaleId: '' });
     chart.priceScale('').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-
-    const volumeData = stockData.map((d: CandleData, i: number) => ({
-      time: d.time, value: d.volume || 0, color: i > 0 && d.close >= stockData[i-1].close ? 'rgba(16, 185, 129, 0.4)' : 'rgba(244, 63, 94, 0.4)'
-    }));
+    const volumeData = stockData.map((d: CandleData, i: number) => ({ time: d.time, value: d.volume || 0, color: i > 0 && d.close >= stockData[i-1].close ? 'rgba(16, 185, 129, 0.4)' : 'rgba(244, 63, 94, 0.4)' }));
     volSeries.setData(volumeData as any);
     volumeSeriesRef.current = volSeries;
     volSeries.applyOptions({ visible: userMode === "VETERAN" });
@@ -183,7 +173,6 @@ export default function AutoInvestDashboard() {
       chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.3)', lineWidth: 1 }).setData(lowerBand);
       chart.addLineSeries({ color: 'rgba(234, 179, 8, 0.7)', lineWidth: 2 }).setData(movingAverage);
     }
-
     chart.timeScale().fitContent();
     const handleResize = () => { if (chartContainerRef.current) chart.applyOptions({ width: chartContainerRef.current.clientWidth }); };
     window.addEventListener('resize', handleResize);
@@ -192,26 +181,25 @@ export default function AutoInvestDashboard() {
   }, [isClient, stockData]);
 
   useEffect(() => {
-    if (volumeSeriesRef.current) {
-      volumeSeriesRef.current.applyOptions({ visible: userMode === "VETERAN" });
-    }
+    if (volumeSeriesRef.current) volumeSeriesRef.current.applyOptions({ visible: userMode === "VETERAN" });
   }, [userMode]);
 
   if (!isClient) return <div className="min-h-screen bg-slate-950" />;
   const isUp = quoteData && Number(quoteData.change) >= 0;
+  const inWatchlist = watchlist.includes(currentTicker);
 
   return (
     <main className={`min-h-screen bg-slate-950 p-4 md:p-8 text-slate-200 font-sans tracking-wide transition-all ${igMode ? 'max-w-md mx-auto border border-slate-800 rounded-xl pb-20 mt-10 shadow-2xl' : ''}`}>
       
       {showPaywall && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-xl p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl max-w-sm w-full p-8">
-            <h2 className="text-xl font-medium text-slate-100 mb-2">Access Restricted</h2>
-            <p className="text-slate-400 text-sm mb-6">Upgrade to Pro to unlock advanced AI quantitative analysis.</p>
-            <a href="https://edenphoto6.gumroad.com/l/spgiui" target="_blank" rel="noopener noreferrer" className="block w-full text-center bg-slate-100 hover:bg-white text-slate-900 font-medium py-3 rounded-md mb-6">Subscribe to Pro (NT$299)</a>
+          <div className="bg-slate-900 border border-amber-900/50 rounded-xl shadow-[0_0_40px_rgba(217,119,6,0.15)] max-w-sm w-full p-8">
+            <h2 className="text-xl font-medium text-amber-500 mb-2 flex items-center gap-2">🔒 PRO 專屬權限</h2>
+            <p className="text-slate-400 text-sm mb-6">升級 Pro 立即解鎖全市場代碼查詢，並每日獲取 AI 嚴選高勝率標的。</p>
+            <a href="https://edenphoto6.gumroad.com/l/spgiui" target="_blank" rel="noopener noreferrer" className="block w-full text-center bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-900 font-bold py-3 rounded-md mb-6 transition-all">Subscribe to Pro (NT$299)</a>
             <div className="border-t border-slate-800 pt-6">
               <div className="flex gap-2">
-                <input type="text" value={inputCode} onChange={(e) => setInputCode(e.target.value)} placeholder="Access Code" className="flex-1 bg-slate-950 border border-slate-800 rounded-md px-4 py-2 text-sm uppercase outline-none text-slate-300" />
+                <input type="text" value={inputCode} onChange={(e) => setInputCode(e.target.value)} placeholder="輸入解鎖碼" className="flex-1 bg-slate-950 border border-slate-800 rounded-md px-4 py-2 text-sm uppercase outline-none text-slate-300 focus:border-amber-500/50" />
                 <button onClick={handleUnlock} className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-md text-sm text-slate-300 transition-colors">Verify</button>
               </div>
             </div>
@@ -229,7 +217,7 @@ export default function AutoInvestDashboard() {
               <button onClick={() => setLang(lang === "TW" ? "EN" : "TW")} className="text-[10px] bg-slate-800 text-slate-400 px-2 py-1 rounded-sm border border-slate-700 hover:bg-slate-700 transition-colors">
                 {lang === "TW" ? "EN" : "中文"}
               </button>
-              {isProUser && <span className="text-[10px] bg-emerald-950 text-emerald-400 px-2 py-1 rounded-sm border border-emerald-900/50 uppercase tracking-widest">Pro</span>}
+              {isProUser && <span className="text-[10px] bg-amber-950/50 text-amber-400 px-2 py-1 rounded-sm border border-amber-900/50 uppercase tracking-widest shadow-[0_0_10px_rgba(217,119,6,0.2)]">Pro</span>}
             </div>
             
             <div className="flex bg-slate-900 rounded-md p-1 border border-slate-800 mt-3 w-fit">
@@ -244,13 +232,16 @@ export default function AutoInvestDashboard() {
               <button onClick={() => { setMarket("US"); setTickerInput(""); }} className={`flex-1 px-6 py-1.5 text-xs tracking-wider rounded-sm transition-colors ${market === "US" ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{t.marketUS}</button>
             </div>
             <div className="flex gap-2 w-full md:w-auto">
-              <input type="text" value={tickerInput} onChange={(e) => setTickerInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearchClick()} placeholder={t.searchPh} autoComplete="off" autoCorrect="off" spellCheck="false" data-form-type="other" className="bg-slate-900 border border-slate-800 rounded-md px-4 py-2 text-sm focus:outline-none focus:border-slate-600 w-full md:w-56 uppercase text-slate-200 transition-colors" />
+              <input type="text" value={tickerInput} onChange={(e) => setTickerInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSearchClick()} placeholder={t.searchPh} autoComplete="off" autoCorrect="off" spellCheck="false" data-form-type="other" className="bg-slate-900 border border-slate-800 rounded-md px-4 py-2 text-sm focus:outline-none focus:border-amber-500/50 w-full md:w-56 uppercase text-slate-200 transition-colors" />
               <button onClick={() => handleSearchClick()} disabled={isLoading || aiLoading} className="bg-slate-200 hover:bg-white text-slate-900 px-6 py-2 rounded-md text-sm font-medium transition-colors">{t.analyze}</button>
             </div>
-            <div className="flex gap-2 mt-1">
-              <span className="text-[10px] text-slate-500 py-1">🔥 Hot:</span>
-              {['2330', '006208', 'NVDA', 'TSLA'].map(tick => (
-                <button key={tick} onClick={() => { setTickerInput(tick); setMarket(tick.match(/[a-zA-Z]/) ? "US" : "TW"); handleSearchClick(tick); }} className="text-[10px] text-slate-400 hover:text-slate-200 bg-slate-900 border border-slate-800 px-2 py-1 rounded transition-colors">{tick}</button>
+            
+            {/* 【完美整合 A】個人自選股清單 (Watchlist) */}
+            <div className="flex flex-wrap gap-2 mt-1 justify-end max-w-md">
+              <span className="text-[10px] text-slate-500 py-1 flex items-center gap-1">⭐ Watchlist:</span>
+              {watchlist.length === 0 && <span className="text-[10px] text-slate-600 py-1">尚無自選</span>}
+              {watchlist.map(tick => (
+                <button key={tick} onClick={() => { setTickerInput(tick.replace('.TW','')); setMarket(tick.includes('.TW') ? "TW" : "US"); handleSearchClick(tick); }} className="text-[10px] text-slate-300 hover:text-white bg-slate-800/50 border border-slate-700 px-2 py-1 rounded transition-colors">{tick.replace('.TW','')}</button>
               ))}
             </div>
           </div>
@@ -258,7 +249,13 @@ export default function AutoInvestDashboard() {
 
         <div className={`flex justify-between items-end pb-2 border-b border-slate-800 ${igMode ? 'pt-6 px-2' : ''}`}>
           <div>
-            <h2 className={`${igMode ? 'text-3xl' : 'text-4xl'} font-light text-slate-100`}>{currentTicker.replace('.TW', '')}</h2>
+            <div className="flex items-center gap-3">
+              <h2 className={`${igMode ? 'text-3xl' : 'text-4xl'} font-light text-slate-100`}>{currentTicker.replace('.TW', '')}</h2>
+              {/* 【完美整合 A】加入自選按鈕 */}
+              {!igMode && currentTicker && !isLoading && (
+                <button onClick={() => toggleWatchlist(currentTicker)} className={`text-xl transition-all hover:scale-110 ${inWatchlist ? 'text-amber-400 drop-shadow-[0_0_5px_rgba(251,191,36,0.5)]' : 'text-slate-600 hover:text-amber-400/50'}`} title="加入自選">★</button>
+              )}
+            </div>
             <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-widest">{igMode ? 'AI Snapshot' : t.quoteLabel}</p>
           </div>
           {quoteData && (
@@ -273,14 +270,11 @@ export default function AutoInvestDashboard() {
 
         <div className={`bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden relative ${igMode ? 'h-[240px]' : 'h-[400px]'}`}>
           {isLoading && <div className="absolute inset-0 z-20 pointer-events-none bg-gradient-to-b from-transparent via-slate-800/20 to-transparent h-full w-full animate-[scan_2s_ease-in-out_infinite]" />}
-          
-          {/* 【防護】錯誤訊息顯示區，取代空轉的黑圖表 */}
           {errorMsg && !isLoading && (
             <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900">
                <p className="text-rose-400 font-mono text-sm bg-rose-950/30 px-4 py-2 rounded border border-rose-900/50">⚠ {errorMsg}</p>
             </div>
           )}
-
           <div className="absolute top-4 left-4 z-10 flex gap-3 text-[10px] font-mono tracking-widest">
             <span className="text-emerald-500/80 cursor-help" title={userMode === "NOVICE" ? "月均線：代表過去一個月多數人的平均買進成本" : ""}>SMA 20 {userMode === "NOVICE" && "[?]"}</span>
             <span className="text-sky-500/80 cursor-help" title={userMode === "NOVICE" ? "布林通道：統計學上的股價正常波動範圍" : ""}>BB 20,2 {userMode === "NOVICE" && "[?]"}</span>
@@ -292,9 +286,10 @@ export default function AutoInvestDashboard() {
         <div className={`grid grid-cols-1 ${igMode ? 'gap-4' : 'md:grid-cols-12 gap-6'}`}>
           <div className={`${igMode ? 'col-span-1' : 'md:col-span-6'} space-y-4`}>
              <div className="bg-slate-900/50 p-5 rounded-xl border border-slate-800">
-               <h3 className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-3">{t.fundDiag}</h3>
+               {/* 【完美整合 B】事件雷達 */}
+               <h3 className="text-[10px] font-semibold text-amber-500/80 uppercase tracking-widest mb-3 flex items-center gap-2"><span>📡</span> {t.fundDiag}</h3>
                <p className="text-slate-300 text-sm leading-relaxed font-light">
-                 {aiLoading ? <span className="animate-pulse text-slate-500">Retrieving macro data...</span> : aiReport?.fundamentalSentiment || aiErrorMsg || "等待分析..."}
+                 {aiLoading ? <span className="animate-pulse text-slate-500">Retrieving macro data & events...</span> : aiReport?.fundamentalSentiment || aiErrorMsg || "等待分析..."}
                </p>
              </div>
              <div className="bg-slate-900/50 p-5 rounded-xl border border-slate-800">
@@ -335,17 +330,42 @@ export default function AutoInvestDashboard() {
           </div>
         </div>
 
+        {/* 【完美整合 C】AI 飆股掃描器 (Daily Top Picks - Paywall) */}
         {!igMode && (
-          <a href="YOUR_AFFILIATE_LINK_HERE" target="_blank" rel="noopener noreferrer" className="block mt-8 p-5 rounded-xl border border-slate-800/60 bg-slate-900/30 hover:bg-slate-900/80 transition-all group">
-            <div className="flex justify-between items-center">
-              <div>
-                <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">{t.adTitle}</p>
-                <h4 className="text-sm text-slate-300 font-light">{t.adDesc}</h4>
-              </div>
-              <span className="text-slate-600 group-hover:text-slate-300 transition-colors text-xl font-light">→</span>
+          <div className="mt-8 border border-amber-900/40 bg-gradient-to-br from-slate-900 to-amber-950/10 rounded-xl p-6 relative overflow-hidden group transition-all duration-500">
+            <h3 className="text-amber-500 text-[10px] font-bold uppercase tracking-widest mb-4 flex items-center gap-2">
+              <span>⚡ AI Daily Top Picks</span>
+              {!isProUser && <span className="bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-[4px] border border-amber-500/30">PRO ONLY</span>}
+            </h3>
+            
+            <div className={`grid grid-cols-1 md:grid-cols-3 gap-4 transition-all duration-500 ${!isProUser ? 'blur-md opacity-40 select-none' : ''}`}>
+              {/* 模擬的 Pro 資料卡片 */}
+              {[
+                { t: "MSTR", w: "High", d: "比特幣強勢突破，帶量站上均線" },
+                { t: "2317", w: "High", d: "外資連買三日，法說會行情啟動" },
+                { t: "TSLA", w: "Medium", d: "底部乖離過大，醞釀短線強彈" }
+              ].map((pick, idx) => (
+                <div key={idx} className="bg-slate-950/50 border border-slate-800 p-4 rounded-lg">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-slate-200 font-bold">{pick.t}</span>
+                    <span className="text-[10px] text-emerald-400 bg-emerald-950/30 px-2 py-0.5 rounded border border-emerald-900/50">Win: {pick.w}</span>
+                  </div>
+                  <p className="text-xs text-slate-400 font-light">{pick.d}</p>
+                </div>
+              ))}
             </div>
-          </a>
+
+            {!isProUser && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-slate-950/60 backdrop-blur-sm rounded-xl transition-all">
+                 <p className="text-amber-400 mb-4 font-medium tracking-wide flex items-center gap-2 text-sm shadow-black drop-shadow-md">🔒 解鎖今日 3 檔高勝率飆股</p>
+                 <button onClick={() => setShowPaywall(true)} className="bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-900 px-8 py-2.5 rounded-md text-sm font-bold transition-all shadow-[0_0_20px_rgba(217,119,6,0.3)] hover:shadow-[0_0_30px_rgba(217,119,6,0.6)] transform hover:-translate-y-0.5">
+                   升級 Pro 立即觀看
+                 </button>
+              </div>
+            )}
+          </div>
         )}
+
       </div>
 
       <div className="fixed bottom-6 right-6 z-50">

@@ -13,14 +13,13 @@ export async function fetchStockData(ticker: string) {
     const quotes = result.indicators.quote[0];
     
     const chartData: { time: string; open: number; high: number; low: number; close: number; volume: number }[] = [];
-    const seenTimes = new Set<string>(); // 【防護 1】建立日期過濾器，解決重複日期導致的黑屏
+    const seenTimes = new Set<string>();
 
     for (let i = 0; i < timestamps.length; i++) {
       if (quotes.close[i] !== null && quotes.open[i] !== null) {
         const date = new Date(timestamps[i] * 1000);
         const timeStr = date.toISOString().split('T')[0];
         
-        // 只允許沒出現過的日期進入陣列
         if (!seenTimes.has(timeStr)) {
           seenTimes.add(timeStr);
           chartData.push({
@@ -35,7 +34,6 @@ export async function fetchStockData(ticker: string) {
       }
     }
 
-    // 【防護 2】強制依照時間先後排序，徹底根絕圖表亂序當機
     chartData.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
     if (chartData.length >= 2) {
@@ -69,27 +67,24 @@ export async function generateAIReport(ticker: string, technicalData: Record<str
 回覆語言必須是：${lang === 'EN' ? 'English' : '繁體中文'}。
 
 【系統最高級別警告】
-請絕對精確識別該代碼（${ticker}）對應的真實企業或 ETF 屬性。若為台股 2330 必須知道是半導體代工，006208 為台股大盤市值型 ETF。絕不允許將科技股誤認為傳產股，或產生任何幻覺。
+請絕對精確識別該代碼（${ticker}）對應的真實企業或 ETF 屬性。若為台股 2330 必須知道是半導體代工，006208 為台股大盤市值型 ETF。
 
 【最新技術面與量價數據】
 - 最新收盤價：${technicalData.lastClose}
 - 20日均線(SMA)：${technicalData.sma}
-- 布林通道上軌：${technicalData.upper}
-- 布林通道下軌：${technicalData.lower}
-- 近五日收盤價趨勢：${technicalData.recentTrend}
+- 布林通道下/上軌：${technicalData.lower} / ${technicalData.upper}
 - 今日成交量狀態：${technicalData.volumeTrend}
 
 【核心任務】
-請根據上述真實數據，結合該標的的「真實產業基本面/籌碼面」認知，給出嚴謹的交易計畫。
-請務必輸出符合以下 JSON 格式的內容，不要包含 Markdown 語法：
+根據上述數據，給出嚴謹的交易計畫。請務必輸出符合以下 JSON 格式：
 
 {
-  "trendStatus": "${lang === 'EN' ? 'Bullish / Bearish / Ranging / Overextended' : '多頭強勢 / 空頭弱勢 / 盤整震盪 / 乖離過大風險區 (4選1)'}",
+  "trendStatus": "${lang === 'EN' ? 'Bullish / Bearish / Ranging' : '多頭強勢 / 空頭弱勢 / 盤整震盪 / 乖離過大 (4選1)'}",
   "winRateEstimate": "${lang === 'EN' ? 'High / Medium / Low' : '高 (適合建倉) / 中 (適合試單) / 低 (嚴格觀望)'}",
-  "fundamentalSentiment": "用一句話精準總結該標的（請帶入該產業或ETF的真實屬性）近期的『基本面/籌碼面』綜合判定。",
-  "diagnosis": "用一句話精準點出目前的『技術面與量價結構』位階與隱患。",
+  "fundamentalSentiment": "用一句話總結該標的近期的『籌碼面』，並【務必點出近期的重大事件/財報/法說會影響】(Catalyst)。",
+  "diagnosis": "用一句話精準點出目前的『技術面與量價結構』隱患。",
   "actionPlan": {
-    "entry": "具體的建議進場價位區間或條件",
+    "entry": "具體的建議進場價位區間",
     "stopLoss": "具體的停損防守價位",
     "target": "短中期的停利目標價位"
   }
@@ -114,7 +109,6 @@ export async function generateAIReport(ticker: string, technicalData: Record<str
     const cleanJsonString = aiText.replace(/```json\n?|\n?```/g, '').trim();
     let parsedData = JSON.parse(cleanJsonString);
 
-    // 【防護 3】強制補齊 AI 漏掉的屬性，防止前台 React 讀取不到而白屏
     parsedData = {
       trendStatus: parsedData.trendStatus || "運算中...",
       winRateEstimate: parsedData.winRateEstimate || "-",
